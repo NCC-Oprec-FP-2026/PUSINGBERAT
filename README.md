@@ -1,6 +1,6 @@
 # PUSINGBERAT — Software Architecture & Implementation Document
 
-* **Description:** PUSINGBERAD (Pusat Integrasi, Monitoring, dan Analisis Berbasis Data or Center for Integration, Monitoring, and Data-Based Analysis) is a custom SIEM application
+* **Description:** PUSINGBERAT (Pusat Integrasi, Monitoring, dan Analisis Berbasis Data or Center for Integration, Monitoring, and Data-Based Analysis) is a custom SIEM application
 * **Project Type:** NCC Open Recuitment Final Project 2026 — Full Stack SIEM  
 * **Team Members:**
   * Muhammad Quthbi Danish Abqori ([@ch-tato](https://github.com/ch-tato))
