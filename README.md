@@ -8,6 +8,7 @@
   * Raditya Zhafran Pranuja ([@rdtzaa](https://github.com/rdtzaa))
 * **Timeline:** 11-23 May 2026
 * **Document Version:** 1.0
+
 ---
 
 ## Table of Contents
@@ -45,41 +46,41 @@ The system follows a **monolithic-with-service-decomposition** pattern. Rather t
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                              CLIENT BROWSER                                │
-│                    React SPA (Vite + Tailwind + Recharts)                  │
+│                  Vue 3 SPA (Vite + Tailwind + Chart.js)                    │
 └───────────────────────────────┬────────────────────────────────────────────┘
                                 │ HTTPS / WSS
                                 ▼
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                          NGINX REVERSE PROXY                               │
 │              /api/* → backend:8080   /ws → backend:8080/ws                 │
-│              /* → React SPA (static files)                                 │
+│              /* → flask:5000  (Vue SPA static files served by Flask)       │
 └───────────────────────────────┬────────────────────────────────────────────┘
                                 │
                                 ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      GO BACKEND (Gin + Gorilla WS)                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐    │
-│  │   HTTP API   │  │  WebSocket   │  │  Log Watcher │  │  Rule Engine  │    │
-│  │  (Gin Router)│  │   Hub        │  │  (fsnotify)  │  │  (YAML-based) │    │
-│  └──────┬───────┘  └──────┬───────┘  └───────┬──────┘  └────────┬──────┘    │
-│         │                 │                  │                  │           │
-│  ┌──────▼─────────────────▼──────────────────▼──────────────────▼────────┐  │
-│  │                        SERVICE LAYER                                  │  │
-│  │  LogSourceService │ EventService │ AlertService │ RuleService         │  │
-│  └──────────────────────────────────┬────────────────────────────────────┘  │
-│                                     │                                       │
-│  ┌──────────────────────────────────▼─────────────────────────────────────┐ │
-│  │                      REPOSITORY LAYER                                  │ │
-│  │         PostgreSQL via pgx driver (connection pool)                    │ │
-│  └────────────────────────────────────────────────────────────────────────┘ │
-└───────────────────────────────┬─────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                      GO BACKEND (Gin + Gorilla WS)                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐   │
+│  │   HTTP API   │  │  WebSocket   │  │  Log Watcher │  │  Rule Engine  │   │
+│  │  (Gin Router)│  │   Hub        │  │  (fsnotify)  │  │  (YAML-based) │   │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └───────┬───────┘   │
+│         │                 │                  │                 │           │
+│  ┌──────▼─────────────────▼──────────────────▼─────────────────▼─────────┐ │
+│  │                        SERVICE LAYER                                  │ │
+│  │  LogSourceService │ EventService │ AlertService │ RuleService         │ │
+│  └──────────────────────────────────┬────────────────────────────────────┘ │
+│                                     │                                      │
+│  ┌──────────────────────────────────▼───────────────────────────────────┐  │
+│  │                      REPOSITORY LAYER                                │  │
+│  │         PostgreSQL via pgx driver (connection pool)                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────┬────────────────────────────────────────────┘
                                 │
           ┌─────────────────────┼────────────────────┐
           ▼                     ▼                    ▼
 ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
 │  PostgreSQL      │  │  Host Filesystem │  │  Discord Webhook │
 │  (events,alerts, │  │  (log files via  │  │  (outbound HTTP  │
-│   rules, sources)│  │   bind mount)    │  │   notifications) │
+│  rules, sources) │  │   bind mount)    │  │   notifications) │
 └──────────────────┘  └──────────────────┘  └──────────────────┘
 ```
 
@@ -115,7 +116,7 @@ Alert Generator
 **Query Flow (Frontend → Data):**
 
 ```
-React SPA
+Vue SPA (via Flask-served HTML/JS)
     │
     ├── REST GET /api/v1/events → Gin Handler → EventService → PostgreSQL
     ├── REST GET /api/v1/alerts → Gin Handler → AlertService → PostgreSQL
@@ -126,7 +127,8 @@ React SPA
 
 | Component | Responsibility |
 |---|---|
-| **Nginx** | TLS termination, reverse proxy, static file serving, path routing |
+| **Nginx** | TLS termination, reverse proxy for `/api/*` and `/ws` to Go backend, proxy `/*` to Flask |
+| **Flask** | Serves built Vue SPA static files (`dist/`) — `index.html` + hashed JS/CSS assets |
 | **Gin HTTP Server** | REST API routing, middleware chain, request validation |
 | **WebSocket Hub** | Client registry, alert broadcasting, connection lifecycle |
 | **Log Watcher** | File watching, offset management, new-path registration |
@@ -248,6 +250,8 @@ backend/
 
 ### 2.2 Frontend Structure
 
+The frontend is split into two sub-directories: `frontend/` for the Vue 3 application and `frontend-server/` for the Flask static file server. This keeps Vue source code cleanly separated from the Python serving layer.
+
 ```
 frontend/
 ├── public/
@@ -262,62 +266,79 @@ frontend/
 │   │   └── stats.ts               # Dashboard stats API calls
 │   ├── components/
 │   │   ├── common/
-│   │   │   ├── Badge.tsx          # Severity badge (color-coded)
-│   │   │   ├── Card.tsx           # Dashboard card wrapper
-│   │   │   ├── DataTable.tsx      # Reusable paginated table
-│   │   │   ├── EmptyState.tsx     # Empty data placeholder
-│   │   │   ├── LoadingSpinner.tsx
-│   │   │   └── StatusDot.tsx      # Live connection indicator
+│   │   │   ├── AppBadge.vue       # Severity badge (color-coded)
+│   │   │   ├── AppCard.vue        # Dashboard card wrapper
+│   │   │   ├── DataTable.vue      # Reusable paginated table
+│   │   │   ├── EmptyState.vue     # Empty data placeholder
+│   │   │   ├── LoadingSpinner.vue
+│   │   │   └── StatusDot.vue      # Live WS connection indicator
 │   │   ├── alerts/
-│   │   │   ├── AlertTable.tsx
-│   │   │   ├── AlertRow.tsx
-│   │   │   └── AlertFilters.tsx
+│   │   │   ├── AlertTable.vue
+│   │   │   ├── AlertRow.vue
+│   │   │   └── AlertFilters.vue
 │   │   ├── charts/
-│   │   │   ├── EventsTimelineChart.tsx
-│   │   │   ├── SeverityDonutChart.tsx
-│   │   │   └── TopSourcesBarChart.tsx
+│   │   │   ├── EventsTimelineChart.vue  # Chart.js Line chart
+│   │   │   ├── SeverityDonutChart.vue   # Chart.js Doughnut chart
+│   │   │   └── TopSourcesBarChart.vue   # Chart.js Bar chart
 │   │   ├── layout/
-│   │   │   ├── Sidebar.tsx
-│   │   │   ├── TopBar.tsx
-│   │   │   └── Layout.tsx         # Wraps Sidebar + TopBar + children
+│   │   │   ├── AppSidebar.vue
+│   │   │   ├── AppTopBar.vue
+│   │   │   └── AppLayout.vue      # Wraps Sidebar + TopBar + <slot>
 │   │   ├── logSources/
-│   │   │   ├── LogSourceCard.tsx
-│   │   │   ├── LogSourceForm.tsx
-│   │   │   └── LogSourceList.tsx
+│   │   │   ├── LogSourceCard.vue
+│   │   │   ├── LogSourceForm.vue
+│   │   │   └── LogSourceList.vue
 │   │   └── rules/
-│   │       ├── RuleCard.tsx
-│   │       ├── RuleEditor.tsx     # YAML textarea editor
-│   │       └── RuleList.tsx
-│   ├── hooks/
-│   │   ├── useAlerts.ts           # SWR/React Query for alerts
+│   │       ├── RuleCard.vue
+│   │       ├── RuleEditor.vue     # YAML textarea editor
+│   │       └── RuleList.vue
+│   ├── composables/
+│   │   ├── useAlerts.ts           # API fetching composable (wraps Axios + reactive state)
 │   │   ├── useWebSocket.ts        # WS connection + reconnection logic
 │   │   ├── useStats.ts
 │   │   └── useLogSources.ts
-│   ├── pages/
-│   │   ├── Dashboard.tsx          # Main overview page
-│   │   ├── Alerts.tsx             # Full alert table
-│   │   ├── Events.tsx             # Raw event browser
-│   │   ├── LogSources.tsx         # Log source management
-│   │   └── Rules.tsx              # Rule management
-│   ├── store/
-│   │   └── alertStore.ts          # Zustand store for live alerts
+│   ├── router/
+│   │   └── index.ts               # Vue Router v4 route definitions
+│   ├── stores/
+│   │   └── alertStore.ts          # Pinia store for live WS alerts
 │   ├── types/
 │   │   ├── alert.ts
 │   │   ├── event.ts
 │   │   ├── logsource.ts
 │   │   └── rule.ts
 │   ├── utils/
-│   │   ├── severity.ts            # Severity → color/label mapping
+│   │   ├── severity.ts            # Severity → color/label/class mapping
 │   │   ├── datetime.ts            # Date formatting helpers
 │   │   └── ws.ts                  # WebSocket URL builder
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── router.tsx                 # React Router v6 routes
+│   ├── views/
+│   │   ├── DashboardView.vue      # Main overview page
+│   │   ├── AlertsView.vue         # Full alert table
+│   │   ├── EventsView.vue         # Raw event browser
+│   │   ├── LogSourcesView.vue     # Log source management
+│   │   └── RulesView.vue          # Rule management
+│   ├── App.vue
+│   └── main.ts
 ├── index.html
 ├── tailwind.config.js
 ├── vite.config.ts
 └── package.json
+
+frontend-server/
+├── app.py                         # Flask app: serves Vue dist/ as static files
+├── requirements.txt               # flask, gunicorn
+└── Dockerfile                     # Python slim image, copies Vue dist/, runs gunicorn
 ```
+
+**Folder Rationale:**
+
+- `views/` — Page-level Vue components. In Vue convention, full-page components are called Views to distinguish them from reusable components.
+- `components/` — All reusable single-file components (`.vue`). Each component is self-contained: template + script + scoped styles in one file.
+- `composables/` — Vue's equivalent of React hooks. Functions prefixed with `use` that return reactive state and methods. They replace React Query for this project.
+- `stores/` — Pinia stores. One store per domain concern. Replaces Zustand.
+- `router/` — Isolated Vue Router configuration. Imported once in `main.ts`.
+- `frontend-server/app.py` — Minimal Flask application. Its only job is to serve the Vite-built `dist/` folder. No business logic lives here.
+
+
 
 ### 2.3 Infrastructure Structure
 
