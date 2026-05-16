@@ -2509,6 +2509,6 @@ A stable SIEM that processes real logs, fires real alerts, shows them in a beaut
 
 ---
 
-*Document prepared for: Custom SIEM University Capstone Project*  
-*Architecture by: Principal Software Architect / Senior DevOps Engineer / Senior Security Engineer role simulation*  
+*Document prepared for: Net Centric Lab Open Recruitment Final Project*  
+*Architecture by: @ch-tato*  
 *Version: 1.0 | Date: May 2025*
