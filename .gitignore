@@ -1,0 +1,128 @@
+# =============================================================================
+# .gitignore — PUSINGBERAT backend
+# Covers: Go, Docker, JetBrains/VSCode, macOS, Linux, environment secrets
+# =============================================================================
+
+script/
+
+# -----------------------------------------------------------------------------
+# Secrets — NEVER commit these
+# -----------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+
+# -----------------------------------------------------------------------------
+# Go build artifacts
+# -----------------------------------------------------------------------------
+# Compiled binaries
+/backend/pusingberat
+/backend/server
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, build artefacts
+*.test
+*.out
+
+# Go workspace file (only if not using workspaces intentionally)
+go.work
+go.work.sum
+
+# Dependency download cache (NOT go.sum — that must be committed)
+/vendor/
+
+# -----------------------------------------------------------------------------
+# Docker / Docker Compose
+# -----------------------------------------------------------------------------
+# Override files with local secrets/ports — never commit
+docker-compose.override.yml
+
+# -----------------------------------------------------------------------------
+# IDE & editor settings
+# -----------------------------------------------------------------------------
+# JetBrains (GoLand, IntelliJ)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Vim / Neovim
+*.swp
+*.swo
+*~
+.netrwhist
+
+# Emacs
+\#*\#
+.#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# -----------------------------------------------------------------------------
+# OS-generated junk
+# -----------------------------------------------------------------------------
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# -----------------------------------------------------------------------------
+# Logs & runtime data
+# -----------------------------------------------------------------------------
+*.log
+logs/
+/tmp/
+
+# -----------------------------------------------------------------------------
+# Test & coverage outputs
+# -----------------------------------------------------------------------------
+coverage.out
+coverage.html
+*.coverprofile
+
+# -----------------------------------------------------------------------------
+# SonarQube
+# -----------------------------------------------------------------------------
+.sonar/
+.scannerwork/
+
+# -----------------------------------------------------------------------------
+# Jenkins
+# -----------------------------------------------------------------------------
+.jenkins/
+
+# -----------------------------------------------------------------------------
+# Node (for frontend — if in same repo)
+# -----------------------------------------------------------------------------
+node_modules/
+dist/
+.nuxt/
+.output/
+frontend/.env
+frontend/.env.local
