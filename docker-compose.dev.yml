@@ -3,17 +3,17 @@ services:
     image: postgres:16-alpine
     container_name: pusingberat-postgres-dev
     environment:
-      POSTGRES_DB: pusingberat
-      POSTGRES_USER: siem
-      POSTGRES_PASSWORD: siempass
+      POSTGRES_DB: ${POSTGRES_DB:-pusingberat}
+      POSTGRES_USER: ${POSTGRES_USER:-siem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-siempass}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
       - ./backend/migrations/001_create_tables.sql:/docker-entrypoint-initdb.d/001_create_tables.sql:ro
       - ./backend/migrations/002_add_indexes.sql:/docker-entrypoint-initdb.d/002_add_indexes.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U siem -d pusingberat"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-siem} -d ${POSTGRES_DB:-pusingberat}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -25,17 +25,17 @@ services:
     working_dir: /app/backend
     command: sh -c "go mod download && go run ./cmd/server"
     environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_NAME: pusingberat
-      DB_USER: siem
-      DB_PASSWORD: siempass
-      SERVER_PORT: "8080"
-      DISCORD_WEBHOOK_URL: ""
-      RULES_DIR: /app/backend/rules
-      LOG_LEVEL: debug
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-pusingberat}
+      DB_USER: ${DB_USER:-siem}
+      DB_PASSWORD: ${DB_PASSWORD:-siempass}
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      RULES_DIR: ${RULES_DIR:-/app/backend/rules}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
     ports:
-      - "8080:8080"
+      - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
     volumes:
       - ./backend:/app/backend
       - go_mod_cache:/go/pkg/mod
@@ -44,7 +44,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/health >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${SERVER_PORT:-8080}/api/v1/health >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -56,9 +56,9 @@ services:
     working_dir: /app/frontend
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
     environment:
-      VITE_API_BASE_URL: http://localhost:8080/api/v1
-      VITE_WS_BASE_URL: ws://localhost:8080/ws
-      CHOKIDAR_USEPOLLING: "true"
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api/v1}
+      VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://localhost:8080/ws}
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
     ports:
       - "5173:5173"
     volumes:
@@ -75,9 +75,9 @@ services:
     working_dir: /app/frontend-server
     command: sh -c "pip install --no-cache-dir -r requirements.txt && flask --app app run --host 0.0.0.0 --port 5000 --debug"
     environment:
-      FLASK_ENV: development
-      VITE_DEV_SERVER_URL: http://frontend:5173
-      BACKEND_API_URL: http://backend:8080/api/v1
+      FLASK_ENV: ${FLASK_ENV:-development}
+      VITE_DEV_SERVER_URL: ${VITE_DEV_SERVER_URL:-http://frontend:5173}
+      BACKEND_API_URL: ${BACKEND_API_URL:-http://backend:8080/api/v1}
     ports:
       - "5000:5000"
     volumes:
