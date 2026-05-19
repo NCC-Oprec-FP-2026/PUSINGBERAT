@@ -1,0 +1,24 @@
+# frontend-server/Dockerfile.dev
+# ============================================================
+# Development image for the Flask frontend server.
+# Werkzeug's built-in reloader (FLASK_DEBUG=1) watches app.py
+# and reloads automatically on save.
+#
+# This image is NOT used in production.
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install dependencies first (cached layer — only re-runs if requirements.txt changes)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Source is mounted as a volume at runtime (see compose), so we do NOT
+# COPY app.py here — the live mount is what enables auto-reload.
+
+EXPOSE 5000
+
+# Flask's dev server with the Werkzeug reloader.
+# FLASK_DEBUG=1 is set via the compose env block.
+CMD ["python", "app.py"]
