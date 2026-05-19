@@ -98,6 +98,8 @@ $RECYCLE.BIN/
 *.log
 logs/
 /tmp/
+__pycache__/
+*.py[cod]
 
 # -----------------------------------------------------------------------------
 # Test & coverage outputs
