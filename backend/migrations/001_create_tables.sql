@@ -1,113 +1,96 @@
 -- ============================================================
--- PUSINGBERAT SIEM — Migration 001: Tables & Triggers
--- Run order: This file MUST run before 002_add_indexes.sql
+-- PUSINGBERAT SIEM - Initial PostgreSQL schema
+-- Creates enum types, core tables, constraints, and updated_at triggers.
+-- Indexes used for read in 002_add_indexes.sql.
 -- ============================================================
 
--- ============================================================
--- EXTENSIONS
--- ============================================================
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";  -- provides gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'severity_level') THEN
+        CREATE TYPE severity_level AS ENUM ('info', 'low', 'medium', 'high', 'critical');
+    END IF;
 
--- ============================================================
--- ENUM TYPES
--- ============================================================
-CREATE TYPE severity_level AS ENUM (
-    'info',
-    'low',
-    'medium',
-    'high',
-    'critical'
-);
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'log_source_status') THEN
+        CREATE TYPE log_source_status AS ENUM ('active', 'inactive', 'error');
+    END IF;
 
-CREATE TYPE log_source_status AS ENUM (
-    'active',
-    'inactive',
-    'error'
-);
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'log_source_type') THEN
+        CREATE TYPE log_source_type AS ENUM ('generic', 'syslog', 'nginx');
+    END IF;
+END
+$$;
 
-
--- ============================================================
--- TABLE: log_sources
--- Tracks registered log file paths and their watcher state.
--- ============================================================
-CREATE TABLE log_sources (
-    id          UUID                 PRIMARY KEY DEFAULT gen_random_uuid(),
-    name        VARCHAR(255)         NOT NULL,
-    file_path   TEXT                 NOT NULL UNIQUE,
-    log_type    VARCHAR(64)          NOT NULL DEFAULT 'generic', -- 'syslog' | 'nginx' | 'generic'
-    status      log_source_status    NOT NULL DEFAULT 'active',
+CREATE TABLE IF NOT EXISTS log_sources (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        VARCHAR(255) NOT NULL,
+    file_path   TEXT NOT NULL UNIQUE,
+    log_type    log_source_type NOT NULL DEFAULT 'generic',
+    status      log_source_status NOT NULL DEFAULT 'active',
     description TEXT,
-    created_at  TIMESTAMPTZ          NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ          NOT NULL DEFAULT NOW()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT log_sources_name_not_blank CHECK (length(btrim(name)) > 0),
+    CONSTRAINT log_sources_file_path_not_blank CHECK (length(btrim(file_path)) > 0)
 );
 
-
--- ============================================================
--- TABLE: events
--- Every parsed log line becomes one row here.
--- High-volume table — keep inserts lean, query via indexes.
--- ============================================================
-CREATE TABLE events (
-    id            BIGSERIAL    PRIMARY KEY,
-    log_source_id UUID         NOT NULL REFERENCES log_sources(id) ON DELETE CASCADE,
-    raw_line      TEXT         NOT NULL,
+CREATE TABLE IF NOT EXISTS events (
+    id            BIGSERIAL PRIMARY KEY,
+    log_source_id UUID NOT NULL REFERENCES log_sources(id) ON DELETE CASCADE,
+    raw_line      TEXT NOT NULL,
     message       TEXT,
     hostname      VARCHAR(255),
     process       VARCHAR(128),
     pid           INTEGER,
     log_level     VARCHAR(32),
-    event_time    TIMESTAMPTZ  NOT NULL,                 -- timestamp parsed from the log line
-    received_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),   -- timestamp of ingestion into DB
-    extra         JSONB                                  -- arbitrary parser-extracted key/value pairs
+    event_time    TIMESTAMPTZ NOT NULL,
+    received_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    extra         JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+    CONSTRAINT events_raw_line_not_blank CHECK (length(btrim(raw_line)) > 0),
+    CONSTRAINT events_pid_non_negative CHECK (pid IS NULL OR pid >= 0),
+    CONSTRAINT events_extra_is_object CHECK (jsonb_typeof(extra) = 'object')
 );
 
-
--- ============================================================
--- TABLE: rules
--- YAML-based detection rules stored as text alongside metadata.
--- Enabled flag allows toggling without deletion.
--- ============================================================
-CREATE TABLE rules (
-    id           UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
-    name         VARCHAR(255)   NOT NULL UNIQUE,
+CREATE TABLE IF NOT EXISTS rules (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name         VARCHAR(255) NOT NULL UNIQUE,
     description  TEXT,
-    yaml_content TEXT           NOT NULL,               -- raw YAML for live editing in the UI
+    yaml_content TEXT NOT NULL,
     severity     severity_level NOT NULL DEFAULT 'medium',
-    enabled      BOOLEAN        NOT NULL DEFAULT true,
-    created_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW()
+    enabled      BOOLEAN NOT NULL DEFAULT true,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT rules_name_not_blank CHECK (length(btrim(name)) > 0),
+    CONSTRAINT rules_yaml_content_not_blank CHECK (length(btrim(yaml_content)) > 0)
 );
 
-
--- ============================================================
--- TABLE: alerts
--- Records generated by the rule engine when a rule fires.
--- rule_name is intentionally denormalized so historical alerts
--- survive future rule deletion (rule_id → ON DELETE SET NULL).
--- ============================================================
-CREATE TABLE alerts (
-    id              UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
-    rule_id         UUID           REFERENCES rules(id)       ON DELETE SET NULL,
-    rule_name       VARCHAR(255)   NOT NULL,                  -- denormalized: survives rule deletion
-    event_id        BIGINT         REFERENCES events(id)      ON DELETE SET NULL,
-    log_source_id   UUID           REFERENCES log_sources(id) ON DELETE SET NULL,
+CREATE TABLE IF NOT EXISTS alerts (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_id         UUID REFERENCES rules(id) ON DELETE SET NULL,
+    rule_name       VARCHAR(255) NOT NULL,
+    event_id        BIGINT REFERENCES events(id) ON DELETE SET NULL,
+    log_source_id   UUID REFERENCES log_sources(id) ON DELETE SET NULL,
     severity        severity_level NOT NULL,
-    title           TEXT           NOT NULL,
+    title           TEXT NOT NULL,
     description     TEXT,
     raw_line        TEXT,
-    triggered_at    TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-    acknowledged    BOOLEAN        NOT NULL DEFAULT false,
+    triggered_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    acknowledged    BOOLEAN NOT NULL DEFAULT false,
     acknowledged_at TIMESTAMPTZ,
-    discord_sent    BOOLEAN        NOT NULL DEFAULT false
+    discord_sent    BOOLEAN NOT NULL DEFAULT false,
+
+    CONSTRAINT alerts_rule_name_not_blank CHECK (length(btrim(rule_name)) > 0),
+    CONSTRAINT alerts_title_not_blank CHECK (length(btrim(title)) > 0),
+    CONSTRAINT alerts_acknowledged_at_when_acknowledged CHECK (
+        (acknowledged = false AND acknowledged_at IS NULL)
+        OR (acknowledged = true AND acknowledged_at IS NOT NULL)
+    )
 );
 
-
--- ============================================================
--- TRIGGER FUNCTION: set_updated_at
--- Automatically keeps updated_at current on every UPDATE.
--- Shared by both log_sources and rules tables.
--- ============================================================
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -116,10 +99,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_log_sources_updated_at
+-- DROP TRIGGER IF EXISTS trg_log_sources_updated_at ON log_sources;
+CREATE OR REPLACE TRIGGER trg_log_sources_updated_at
     BEFORE UPDATE ON log_sources
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();
 
-CREATE TRIGGER trg_rules_updated_at
+-- DROP TRIGGER IF EXISTS trg_rules_updated_at ON rules;
+CREATE OR REPLACE TRIGGER trg_rules_updated_at
     BEFORE UPDATE ON rules
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+    FOR EACH ROW
+    EXECUTE FUNCTION set_updated_at();

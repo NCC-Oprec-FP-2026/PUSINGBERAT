@@ -1,61 +1,33 @@
 -- ============================================================
--- PUSINGBERAT SIEM — Migration 002: Indexes
--- Run order: MUST run after 001_create_tables.sql
+-- PUSINGBERAT SIEM - Query and dashboard indexes
 -- ============================================================
 
--- ============================================================
--- INDEXES: events
--- Primary access patterns:
---   • Dashboard timeline  → filter by event_time range
---   • Event browser       → filter by log_source_id or log_level
---   • Ingestion latency   → sort by received_at
--- ============================================================
+-- Log sources: common list and health filters.
+CREATE INDEX IF NOT EXISTS idx_log_sources_status ON log_sources (status);
+CREATE INDEX IF NOT EXISTS idx_log_sources_log_type ON log_sources (log_type);
+CREATE INDEX IF NOT EXISTS idx_log_sources_created_at ON log_sources (created_at DESC);
 
--- Most queries filter or sort by event timestamp (dashboard chart, browser pagination)
-CREATE INDEX idx_events_event_time
-    ON events (event_time DESC);
+-- Events: high-volume table queried by timeline, source, level, and recency.
+CREATE INDEX IF NOT EXISTS idx_events_event_time ON events (event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_events_received_at ON events (received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_log_source_id ON events (log_source_id);
+CREATE INDEX IF NOT EXISTS idx_events_log_source_event_time ON events (log_source_id, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_events_log_level ON events (log_level);
+CREATE INDEX IF NOT EXISTS idx_events_extra_gin ON events USING GIN (extra);
 
--- Joining / filtering events by their originating log source
-CREATE INDEX idx_events_log_source_id
-    ON events (log_source_id);
+-- Rules: management UI lists enabled rules and filters by severity.
+CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules (enabled);
+CREATE INDEX IF NOT EXISTS idx_rules_severity ON rules (severity);
+CREATE INDEX IF NOT EXISTS idx_rules_updated_at ON rules (updated_at DESC);
 
--- Ordering by ingestion time for latency analysis and "latest events" queries
-CREATE INDEX idx_events_received_at
-    ON events (received_at DESC);
-
--- Filtering by severity/level (e.g. "show only ERROR events")
-CREATE INDEX idx_events_log_level
-    ON events (log_level);
-
--- GIN index on JSONB extra column — enables fast key/value lookups
--- e.g. WHERE extra @> '{"status_code": "500"}'
-CREATE INDEX idx_events_extra_gin
-    ON events USING GIN (extra);
-
-
--- ============================================================
--- INDEXES: alerts
--- Primary access patterns:
---   • Alert feed         → sort by triggered_at DESC
---   • Severity filter    → filter by severity
---   • Active alert count → WHERE acknowledged = false (partial index)
---   • Source drill-down  → filter by log_source_id
--- ============================================================
-
--- Default sort order for the alerts table and live feed
-CREATE INDEX idx_alerts_triggered_at
-    ON alerts (triggered_at DESC);
-
--- Severity filter on the alerts page
-CREATE INDEX idx_alerts_severity
-    ON alerts (severity);
-
--- Partial index — covers ONLY unacknowledged alerts.
--- Makes "active alert count" widget extremely fast regardless of total alert volume.
-CREATE INDEX idx_alerts_unack
-    ON alerts (acknowledged)
-    WHERE acknowledged = false;
-
--- Filter alerts by originating log source
-CREATE INDEX idx_alerts_log_source_id
-    ON alerts (log_source_id);
+-- Alerts: dashboard, filters, active alert widget, and webhook retry flow.
+CREATE INDEX IF NOT EXISTS idx_alerts_triggered_at ON alerts (triggered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts (severity);
+CREATE INDEX IF NOT EXISTS idx_alerts_log_source_id ON alerts (log_source_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_rule_id ON alerts (rule_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_event_id ON alerts (event_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_unacknowledged ON alerts (triggered_at DESC)
+WHERE acknowledged = false;
+CREATE INDEX IF NOT EXISTS idx_alerts_discord_pending ON alerts (triggered_at ASC)
+WHERE discord_sent = false;
+CREATE INDEX IF NOT EXISTS idx_alerts_severity_triggered_at ON alerts (severity, triggered_at DESC);
