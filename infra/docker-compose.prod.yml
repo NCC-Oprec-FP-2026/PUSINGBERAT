@@ -1,3 +1,5 @@
+# this is just a placeholder file for development, need to be refactor for production.
+# change this for production.
 name: pusingberat-dev
 
 networks:
@@ -20,7 +22,7 @@ services:
             - ../backend/migrations/001_create_tables.sql:/docker-entrypoint-initdb.d/001_create_tables.sql:ro
             - ../backend/migrations/002_add_indexes.sql:/docker-entrypoint-initdb.d/002_add_indexes.sql:ro
         healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-siem} -d ${POSTGRES_DB:-pusingberat}"]
+            test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-siem} -d ${POSTGRES_DB:-pusingberat}" ]
             interval: 5s
             timeout: 5s
             retries: 10
@@ -56,7 +58,7 @@ services:
             postgres:
                 condition: service_healthy
         healthcheck:
-            test: ["CMD-SHELL", "wget -qO- http://localhost:${SERVER_PORT:-8080}/api/v1/health >/dev/null 2>&1"]
+            test: [ "CMD-SHELL", "wget -qO- http://localhost:${SERVER_PORT:-8080}/api/v1/health >/dev/null 2>&1" ]
             interval: 10s
             timeout: 5s
             retries: 10
@@ -106,7 +108,7 @@ services:
             backend:
                 condition: service_healthy
         healthcheck:
-            test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=2).read()\""]
+            test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=2).read()\"" ]
             interval: 10s
             timeout: 5s
             retries: 10
