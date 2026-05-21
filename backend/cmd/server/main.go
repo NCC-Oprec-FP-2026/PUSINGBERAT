@@ -19,8 +19,10 @@ import (
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/api/handler"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/config"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/service"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/watcher"
 )
 
 func main() {
@@ -100,10 +102,13 @@ func buildRouter(cfg *config.Config, db *pgxpool.Pool) *gin.Engine {
 	ruleRepo := repository.NewRuleRepo(db)
 	alertRepo := repository.NewAlertRepo(db)
 
-	logSourceService := service.NewLogSourceService(logSourceRepo)
 	eventService := service.NewEventService(eventRepo)
+	watcherRegistry := watcher.NewRegistry(eventService)
+	logSourceService := service.NewLogSourceService(logSourceRepo, watcherRegistry)
 	ruleService := service.NewRuleService(ruleRepo)
 	alertService := service.NewAlertService(alertRepo)
+
+	startExistingWatchers(context.Background(), logSourceRepo, watcherRegistry)
 
 	logSourceHandler := handler.NewLogSourceHandler(logSourceService)
 	eventHandler := handler.NewEventHandler(eventService)
@@ -129,6 +134,22 @@ func buildRouter(cfg *config.Config, db *pgxpool.Pool) *gin.Engine {
 	})
 
 	return router
+}
+
+func startExistingWatchers(ctx context.Context, repo *repository.LogSourceRepo, registry *watcher.Registry) {
+	sources, _, err := repo.List(ctx, repository.LogSourceFilter{
+		Status:  domain.LogSourceStatusActive,
+		Page:    1,
+		PerPage: 200,
+	})
+	if err != nil {
+		log.Printf("WARN: load active log sources failed: %v", err)
+		return
+	}
+
+	for i := range sources {
+		registry.Start(&sources[i])
+	}
 }
 
 type HealthResponse struct {

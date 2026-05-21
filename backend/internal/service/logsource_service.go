@@ -19,12 +19,22 @@ type LogSourceRepository interface {
 	Delete(ctx context.Context, id string) error
 }
 
-type LogSourceService struct {
-	repo LogSourceRepository
+type SourceWatcher interface {
+	Start(source *domain.LogSource)
+	Stop(sourceID string)
 }
 
-func NewLogSourceService(repo LogSourceRepository) *LogSourceService {
-	return &LogSourceService{repo: repo}
+type LogSourceService struct {
+	repo    LogSourceRepository
+	watcher SourceWatcher
+}
+
+func NewLogSourceService(repo LogSourceRepository, watcher ...SourceWatcher) *LogSourceService {
+	service := &LogSourceService{repo: repo}
+	if len(watcher) > 0 {
+		service.watcher = watcher[0]
+	}
+	return service
 }
 
 func (s *LogSourceService) Create(ctx context.Context, source *domain.LogSource) error {
@@ -32,7 +42,13 @@ func (s *LogSourceService) Create(ctx context.Context, source *domain.LogSource)
 	if err := validateLogSource(source); err != nil {
 		return err
 	}
-	return s.repo.Create(ctx, source)
+	if err := s.repo.Create(ctx, source); err != nil {
+		return err
+	}
+	if s.watcher != nil && source.Status == domain.LogSourceStatusActive {
+		s.watcher.Start(source)
+	}
+	return nil
 }
 
 func (s *LogSourceService) GetByID(ctx context.Context, id string) (*domain.LogSource, error) {
@@ -58,7 +74,17 @@ func (s *LogSourceService) Update(ctx context.Context, source *domain.LogSource)
 	if err := validateLogSource(source); err != nil {
 		return err
 	}
-	return s.repo.Update(ctx, source)
+	if err := s.repo.Update(ctx, source); err != nil {
+		return err
+	}
+	if s.watcher != nil {
+		if source.Status == domain.LogSourceStatusActive {
+			s.watcher.Start(source)
+		} else {
+			s.watcher.Stop(source.ID)
+		}
+	}
+	return nil
 }
 
 func (s *LogSourceService) UpdateStatus(ctx context.Context, id string, status domain.LogSourceStatus) error {
@@ -68,14 +94,28 @@ func (s *LogSourceService) UpdateStatus(ctx context.Context, id string, status d
 	if status == "" {
 		return fmt.Errorf("%w: status is required", ErrValidation)
 	}
-	return s.repo.UpdateStatus(ctx, strings.TrimSpace(id), status)
+	id = strings.TrimSpace(id)
+	if err := s.repo.UpdateStatus(ctx, id, status); err != nil {
+		return err
+	}
+	if s.watcher != nil && status != domain.LogSourceStatusActive {
+		s.watcher.Stop(id)
+	}
+	return nil
 }
 
 func (s *LogSourceService) Delete(ctx context.Context, id string) error {
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("%w: id is required", ErrValidation)
 	}
-	return s.repo.Delete(ctx, strings.TrimSpace(id))
+	id = strings.TrimSpace(id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	if s.watcher != nil {
+		s.watcher.Stop(id)
+	}
+	return nil
 }
 
 func normalizeLogSource(source *domain.LogSource) {
