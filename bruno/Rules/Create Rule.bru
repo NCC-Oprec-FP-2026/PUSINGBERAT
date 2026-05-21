@@ -1,0 +1,34 @@
+meta {
+  name: Create Rule
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/v1/rules
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "SSH Brute Force",
+    "yaml_content": "id: ssh-brute-force\nname: SSH Brute Force\nseverity: high",
+    "severity": "high",
+    "description": "Detects repeated SSH auth failures"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.data.id: isDefined
+  res.body.data.name: eq "SSH Brute Force"
+  res.body.data.severity: eq "high"
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.data && data.data.id) {
+    bru.setVar("rule_id", data.data.id);
+  }
+}

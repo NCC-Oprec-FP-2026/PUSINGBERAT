@@ -1,0 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-siem-bg text-siem-text-primary font-sans;
+    min-height: 100vh;
+  }
+
+  /* Custom scrollbar for the dark theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-siem-bg;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-siem-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-siem-text-secondary;
+  }
+}
+
+@layer components {
+  /* Reusable card surface */
+  .siem-card {
+    @apply bg-siem-surface border border-siem-border rounded-xl p-5;
+  }
+
+  /* Severity badge base */
+  .siem-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide;
+  }
+
+  .siem-badge-critical {
+    @apply siem-badge bg-severity-critical/15 text-severity-critical;
+  }
+
+  .siem-badge-high {
+    @apply siem-badge bg-severity-high/15 text-severity-high;
+  }
+
+  .siem-badge-medium {
+    @apply siem-badge bg-severity-medium/15 text-severity-medium;
+  }
+
+  .siem-badge-low {
+    @apply siem-badge bg-severity-low/15 text-severity-low;
+  }
+
+  .siem-badge-info {
+    @apply siem-badge bg-severity-info/15 text-severity-info;
+  }
+}

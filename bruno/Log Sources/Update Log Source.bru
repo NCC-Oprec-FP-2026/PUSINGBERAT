@@ -1,0 +1,22 @@
+meta {
+  name: Update Log Source
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{base_url}}/api/v1/sources/{{source_id}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "inactive"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.status: eq "inactive"
+}

@@ -1,0 +1,23 @@
+# frontend/Dockerfile.dev
+# ============================================================
+# Development image for the Vue 3 + Vite frontend.
+# Vite's HMR (Hot Module Replacement) provides instant updates
+# in the browser on save — no full reload needed.
+#
+# This image is NOT used in production.
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies first (cached layer — only re-runs if package*.json change)
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Source is mounted as a volume at runtime (see compose), so we do NOT
+# COPY src/ here — the live mount is what enables HMR.
+
+EXPOSE 5173
+
+# Vite dev server bound to 0.0.0.0 so it's accessible from the Docker host.
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]

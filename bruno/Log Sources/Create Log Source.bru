@@ -1,0 +1,34 @@
+meta {
+  name: Create Log Source
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/v1/sources
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "System Syslog",
+    "file_path": "/var/log/syslog",
+    "log_type": "syslog",
+    "description": "Main system log"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.data.id: isDefined
+  res.body.data.name: eq "System Syslog"
+  res.body.data.status: eq "active"
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.data && data.data.id) {
+    bru.setVar("source_id", data.data.id);
+  }
+}

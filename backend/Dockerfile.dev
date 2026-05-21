@@ -1,0 +1,33 @@
+# backend/Dockerfile.dev
+# ============================================================
+# Development image for the Go backend.
+# Uses Air (https://github.com/air-verse/air) for hot-reload:
+# any .go file change triggers an automatic rebuild + restart.
+#
+# This image is NOT used in production.
+
+FROM golang:1.25.0-alpine
+
+# Install system dependencies:
+#   git     — required by 'go mod download' for private modules
+#   ca-certs — for outbound HTTPS (Discord webhook)
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Install Air — the hot-reload runner for Go
+RUN go install github.com/air-verse/air@latest
+
+WORKDIR /app
+
+# Pre-download Go modules so 'air' rebuilds are fast.
+# These layers are cached unless go.mod / go.sum change.
+COPY go.mod go.sum ./
+RUN go mod download
+
+# The rest of the source is mounted as a volume at runtime (see compose),
+# so we do NOT COPY . . here — that would bake in a stale snapshot.
+
+EXPOSE 8080
+
+# Air reads .air.toml from the working directory.
+# It watches for .go file changes, rebuilds, and restarts the binary.
+CMD ["air", "-c", ".air.toml"]
