@@ -86,6 +86,11 @@ func (w *FileWatcher) parseLine(line string) (*domain.Event, error) {
 		EventTime:   parsed.EventTime,
 		Extra:       parsed.Extra,
 	}
+	if event.Extra == nil {
+		event.Extra = map[string]any{}
+	}
+	event.Extra["log_type"] = string(w.source.LogType)
+	event.Extra["log_source_name"] = w.source.Name
 
 	if parsed.Message != "" {
 		event.Message = stringPtr(parsed.Message)

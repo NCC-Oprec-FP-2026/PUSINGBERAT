@@ -2,7 +2,6 @@ from pathlib import Path
 
 from flask import Flask, jsonify, send_from_directory
 
-
 DIST_DIR = Path("/app/frontend/dist")
 
 app = Flask(__name__, static_folder=None)

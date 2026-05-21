@@ -1,0 +1,13 @@
+name: Failed Login
+description: Detect a single failed authentication event.
+severity: medium
+enabled: true
+log_types:
+  - syslog
+conditions:
+  - field: message
+    operator: contains
+    value: Failed password
+alert:
+  title: Failed login detected
+  description: A failed password event was observed in syslog.

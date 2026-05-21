@@ -18,12 +18,22 @@ type EventRepository interface {
 	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
-type EventService struct {
-	repo EventRepository
+type EventEvaluator interface {
+	Evaluate(ctx context.Context, event *domain.Event) ([]domain.Alert, error)
 }
 
-func NewEventService(repo EventRepository) *EventService {
-	return &EventService{repo: repo}
+type EventService struct {
+	repo      EventRepository
+	evaluator EventEvaluator
+	alerts    chan<- domain.Alert
+}
+
+func NewEventService(repo EventRepository, evaluator EventEvaluator, alerts chan<- domain.Alert) *EventService {
+	return &EventService{
+		repo:      repo,
+		evaluator: evaluator,
+		alerts:    alerts,
+	}
 }
 
 func (s *EventService) Create(ctx context.Context, event *domain.Event) error {
@@ -41,7 +51,25 @@ func (s *EventService) Create(ctx context.Context, event *domain.Event) error {
 	if event.EventTime.IsZero() {
 		event.EventTime = time.Now().UTC()
 	}
-	return s.repo.Create(ctx, event)
+	if err := s.repo.Create(ctx, event); err != nil {
+		return err
+	}
+
+	if s.evaluator != nil && s.alerts != nil {
+		alerts, err := s.evaluator.Evaluate(ctx, event)
+		if err != nil {
+			return err
+		}
+		for _, alert := range alerts {
+			select {
+			case s.alerts <- alert:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *EventService) GetByID(ctx context.Context, id int64) (*domain.Event, error) {

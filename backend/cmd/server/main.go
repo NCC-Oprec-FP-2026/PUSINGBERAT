@@ -21,6 +21,7 @@ import (
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/config"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/ruleengine"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/service"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/watcher"
 )
@@ -102,11 +103,26 @@ func buildRouter(cfg *config.Config, db *pgxpool.Pool) *gin.Engine {
 	ruleRepo := repository.NewRuleRepo(db)
 	alertRepo := repository.NewAlertRepo(db)
 
-	eventService := service.NewEventService(eventRepo)
+	if err := ruleengine.SeedRules(context.Background(), ruleRepo, cfg.RulesDir); err != nil {
+		log.Printf("WARN: seed rules failed: %v", err)
+	}
+
+	loadedRules, err := ruleengine.LoadEnabledRulesFromDB(context.Background(), ruleRepo)
+	if err != nil {
+		log.Printf("WARN: load enabled rules failed: %v", err)
+	}
+	log.Printf("INFO: rule engine loaded %d enabled rules", len(loadedRules))
+
+	alertChan := make(chan domain.Alert, 100)
+	engine := ruleengine.NewEngine(loadedRules)
+	alertService := service.NewAlertService(alertRepo)
+	dispatcher := ruleengine.NewAlertDispatcher(alertChan, alertService)
+	go dispatcher.Run(context.Background())
+
+	eventService := service.NewEventService(eventRepo, engine, alertChan)
 	watcherRegistry := watcher.NewRegistry(eventService)
 	logSourceService := service.NewLogSourceService(logSourceRepo, watcherRegistry)
 	ruleService := service.NewRuleService(ruleRepo)
-	alertService := service.NewAlertService(alertRepo)
 
 	startExistingWatchers(context.Background(), logSourceRepo, watcherRegistry)
 

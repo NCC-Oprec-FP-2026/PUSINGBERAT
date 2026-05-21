@@ -1,0 +1,20 @@
+name: SSH Brute Force
+description: Detect repeated SSH failed password attempts from syslog.
+severity: high
+enabled: true
+log_types:
+  - syslog
+conditions:
+  - field: process
+    operator: equals
+    value: sshd
+  - field: message
+    operator: contains
+    value: Failed password
+threshold:
+  count: 5
+  window: "2m"
+  group_by: hostname
+alert:
+  title: SSH brute force suspected
+  description: Five SSH failed password events were observed within two minutes.

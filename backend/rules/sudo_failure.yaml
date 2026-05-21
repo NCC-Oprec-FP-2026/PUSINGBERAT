@@ -1,0 +1,16 @@
+name: Sudo Failure
+description: Detect failed sudo authentication attempts.
+severity: medium
+enabled: true
+log_types:
+  - syslog
+conditions:
+  - field: process
+    operator: equals
+    value: sudo
+  - field: message
+    operator: regex
+    value: "authentication failure|incorrect password"
+alert:
+  title: Sudo authentication failure
+  description: A sudo authentication failure was observed.
