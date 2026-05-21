@@ -1,0 +1,16 @@
+meta {
+  name: Get Event
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/events/{{event_id}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.id: eq {{event_id}}
+}

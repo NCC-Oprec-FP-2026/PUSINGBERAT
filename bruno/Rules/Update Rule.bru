@@ -1,0 +1,25 @@
+meta {
+  name: Update Rule
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{base_url}}/api/v1/rules/{{rule_id}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "SSH Brute Force Updated",
+    "yaml_content": "id: ssh-brute-force\nname: SSH Brute Force\nseverity: high\nenabled: true",
+    "severity": "high",
+    "description": "Detects repeated SSH auth failures (updated description)"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.name: eq "SSH Brute Force Updated"
+}

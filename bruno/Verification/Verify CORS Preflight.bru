@@ -1,0 +1,24 @@
+meta {
+  name: Verify CORS Preflight
+  type: http
+  seq: 3
+}
+
+options {
+  url: {{base_url}}/api/v1/sources
+  body: none
+  auth: none
+}
+
+headers {
+  Origin: http://localhost:5173
+  Access-Control-Request-Method: POST
+}
+
+tests {
+  test("CORS headers should allow requests from allowed origins", function () {
+    expect(res.getStatus()).to.equal(204);
+    const allowOrigin = res.getHeader("access-control-allow-origin") || res.getHeader("Access-Control-Allow-Origin");
+    expect(allowOrigin).to.equal("http://localhost:5173");
+  });
+}

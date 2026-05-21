@@ -1,0 +1,15 @@
+meta {
+  name: Delete Alert
+  type: http
+  seq: 4
+}
+
+delete {
+  url: {{base_url}}/api/v1/alerts/{{alert_id}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 204
+}

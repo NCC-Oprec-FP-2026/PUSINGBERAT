@@ -1,0 +1,17 @@
+meta {
+  name: Test 404
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/v1/nonexistent
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 404
+  res.body.error: eq "not_found"
+  res.body.message: eq "route not found"
+}

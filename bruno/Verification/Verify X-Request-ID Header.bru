@@ -1,0 +1,19 @@
+meta {
+  name: Verify X-Request-ID Header
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/health
+  body: none
+  auth: none
+}
+
+tests {
+  test("X-Request-ID header should be present", function () {
+    const requestId = res.getHeader("x-request-id") || res.getHeader("X-Request-ID") || res.getHeader("X-Request-Id");
+    expect(requestId).to.not.be.undefined;
+    expect(requestId).to.not.be.empty;
+  });
+}
