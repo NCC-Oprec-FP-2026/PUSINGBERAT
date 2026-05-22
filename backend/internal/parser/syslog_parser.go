@@ -32,8 +32,8 @@ import (
 var syslogRe = regexp.MustCompile(
 	`^(?P<month>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+(?P<time>\d{2}:\d{2}:\d{2})\s+` +
 		`(?P<host>\S+)\s+` +
-		`(?P<proc>[^\s\[:]+)` +       // process name (up to [ or : or whitespace)
-		`(?:\[(?P<pid>\d+)\])?` +      // optional [PID]
+		`(?P<proc>[^\s\[:]+)` + // process name (up to [ or : or whitespace)
+		`(?:\[(?P<pid>\d+)\])?` + // optional [PID]
 		`:\s+(?P<msg>.+)$`,
 )
 

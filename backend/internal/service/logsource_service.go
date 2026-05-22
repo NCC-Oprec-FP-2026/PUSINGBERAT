@@ -2,15 +2,12 @@
 // backend. Each service struct depends on repository interfaces (defined here,
 // at the point of consumption) so that concrete implementations can be swapped
 // for mocks in tests.
-//
-// Services are intentionally thin for Day 2: they validate input, delegate to
-// repositories, and wrap errors with context. Future sprints will add watcher
-// registry notifications, rule engine reloads, and WS broadcasts here.
 package service
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -33,21 +30,43 @@ type LogSourceRepository interface {
 }
 
 // ---------------------------------------------------------------------------
+// WatcherRegistry interface (optional dependency)
+// ---------------------------------------------------------------------------
+
+// WatcherRegistry defines the contract for managing file watchers. The
+// concrete implementation lives in package watcher. This is defined at the
+// point of consumption to avoid a hard dependency from service → watcher.
+type WatcherRegistry interface {
+	AddWatcher(source *domain.LogSource) error
+	RemoveWatcher(sourceID uuid.UUID)
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
 // LogSourceService orchestrates LogSource CRUD operations with input
-// validation and error wrapping.
+// validation, error wrapping, and optional watcher registry notifications.
 type LogSourceService struct {
-	repo LogSourceRepository
+	repo     LogSourceRepository
+	registry WatcherRegistry // nil when watcher pipeline is not enabled
 }
 
 // NewLogSourceService constructs a LogSourceService with the given repository.
+// The watcher registry can be set later via SetRegistry once the pipeline is
+// initialised (avoids circular init order issues in main.go).
 func NewLogSourceService(repo LogSourceRepository) *LogSourceService {
 	return &LogSourceService{repo: repo}
 }
 
-// Create validates and persists a new LogSource.
+// SetRegistry attaches a WatcherRegistry to this service. After this call,
+// Create and Delete will automatically start/stop watchers.
+func (s *LogSourceService) SetRegistry(reg WatcherRegistry) {
+	s.registry = reg
+}
+
+// Create validates and persists a new LogSource. When a WatcherRegistry is
+// attached, it also starts watching the new file path.
 func (s *LogSourceService) Create(ctx context.Context, ls *domain.LogSource) error {
 	if err := s.validate(ls); err != nil {
 		return err
@@ -65,6 +84,21 @@ func (s *LogSourceService) Create(ctx context.Context, ls *domain.LogSource) err
 	if err := s.repo.Create(ctx, ls); err != nil {
 		return fmt.Errorf("logSourceService.Create: %w", err)
 	}
+
+	// --- Watcher Pipeline Integration ----------------------------------------
+	// If the source is active and a registry is configured, start watching.
+	if s.registry != nil && ls.Status == domain.LogSourceStatusActive {
+		if err := s.registry.AddWatcher(ls); err != nil {
+			// Log the error but do NOT fail the HTTP request — the source is
+			// already persisted. The watcher can be manually restarted later.
+			slog.Error("logSourceService.Create: failed to start watcher",
+				"source_id", ls.ID,
+				"path", ls.FilePath,
+				"err", err,
+			)
+		}
+	}
+
 	return nil
 }
 
@@ -97,11 +131,18 @@ func (s *LogSourceService) Update(ctx context.Context, ls *domain.LogSource) err
 	return nil
 }
 
-// Delete removes a LogSource by ID.
+// Delete removes a LogSource by ID. When a WatcherRegistry is attached,
+// it also stops the associated watcher.
 func (s *LogSourceService) Delete(ctx context.Context, id uuid.UUID) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return fmt.Errorf("logSourceService.Delete: %w", err)
 	}
+
+	// --- Watcher Pipeline Integration ----------------------------------------
+	if s.registry != nil {
+		s.registry.RemoveWatcher(id)
+	}
+
 	return nil
 }
 
