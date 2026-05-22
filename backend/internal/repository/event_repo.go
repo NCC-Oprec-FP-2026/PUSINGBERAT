@@ -29,6 +29,15 @@ func (r *EventRepo) Create(ctx context.Context, ev *domain.ParsedEvent) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, received_at`
 
+	// Default nil Extra to an empty JSON object so the NOT NULL constraint
+	// is satisfied. PostgreSQL's column DEFAULT only applies when the column
+	// is omitted from the INSERT — explicitly passing NULL triggers a
+	// constraint violation.
+	extra := ev.Extra
+	if extra == nil {
+		extra = []byte(`{}`)
+	}
+
 	err := r.pool.QueryRow(ctx, query,
 		ev.LogSourceID,
 		ev.RawLine,
@@ -38,7 +47,7 @@ func (r *EventRepo) Create(ctx context.Context, ev *domain.ParsedEvent) error {
 		ev.PID,
 		ev.LogLevel,
 		ev.EventTime,
-		ev.Extra,
+		extra,
 	).Scan(&ev.ID, &ev.ReceivedAt)
 
 	if err != nil {
