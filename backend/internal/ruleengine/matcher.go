@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -9,7 +10,7 @@ import (
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 )
 
-func ruleConditionsMatch(rule RuleDefinition, event *domain.Event) (bool, error) {
+func ruleConditionsMatch(rule RuleDefinition, event *domain.ParsedEvent) (bool, error) {
 	if !logTypeAllowed(rule.LogTypes, event) {
 		return false, nil
 	}
@@ -24,7 +25,7 @@ func ruleConditionsMatch(rule RuleDefinition, event *domain.Event) (bool, error)
 	return true, nil
 }
 
-func logTypeAllowed(logTypes []string, event *domain.Event) bool {
+func logTypeAllowed(logTypes []string, event *domain.ParsedEvent) bool {
 	if len(logTypes) == 0 {
 		return true
 	}
@@ -38,7 +39,7 @@ func logTypeAllowed(logTypes []string, event *domain.Event) bool {
 	return false
 }
 
-func conditionMatches(condition Condition, event *domain.Event) (bool, error) {
+func conditionMatches(condition Condition, event *domain.ParsedEvent) (bool, error) {
 	actual := fieldValue(event, condition.Field)
 	expected := condition.Value
 
@@ -76,8 +77,9 @@ func compareNumeric(actual, expected string, compare func(float64, float64) bool
 	return compare(actualNumber, expectedNumber), nil
 }
 
-func fieldValue(event *domain.Event, field string) string {
-	switch strings.ToLower(strings.TrimSpace(field)) {
+func fieldValue(event *domain.ParsedEvent, field string) string {
+	normalized := strings.ToLower(strings.TrimSpace(field))
+	switch normalized {
 	case "raw_line":
 		return event.RawLine
 	case "message":
@@ -99,19 +101,20 @@ func fieldValue(event *domain.Event, field string) string {
 		if event.PID == nil {
 			return ""
 		}
-		return strconv.FormatInt(int64(*event.PID), 10)
+		return strconv.Itoa(*event.PID)
 	case "log_level", "level":
 		if event.LogLevel == nil {
 			return ""
 		}
 		return *event.LogLevel
 	default:
-		if strings.HasPrefix(field, "extra.") {
-			key := strings.TrimPrefix(field, "extra.")
-			if event.Extra == nil {
+		if strings.HasPrefix(normalized, "extra.") {
+			key := strings.TrimPrefix(normalized, "extra.")
+			var extra map[string]any
+			if len(event.Extra) == 0 || json.Unmarshal(event.Extra, &extra) != nil {
 				return ""
 			}
-			if value, ok := event.Extra[key]; ok && value != nil {
+			if value, ok := extra[key]; ok && value != nil {
 				return fmt.Sprint(value)
 			}
 		}

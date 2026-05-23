@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -172,6 +173,7 @@ func (fw *FileWatcher) readAndParse() {
 		// Populate the fields the parser deliberately leaves blank.
 		ev.LogSourceID = fw.sourceID
 		ev.ReceivedAt = now
+		ev.Extra = enrichEventExtra(ev.Extra, fw.logType, fw.parser.Name())
 
 		// Non-blocking send: if the channel is full, log a warning
 		// and drop the event rather than blocking the watcher goroutine.
@@ -184,6 +186,21 @@ func (fw *FileWatcher) readAndParse() {
 			)
 		}
 	}
+}
+
+func enrichEventExtra(raw json.RawMessage, logType string, parserName string) json.RawMessage {
+	extra := map[string]any{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &extra)
+	}
+	extra["log_type"] = logType
+	extra["parser"] = parserName
+
+	data, err := json.Marshal(extra)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return data
 }
 
 // handleRotation is called when a RENAME or REMOVE event is detected.

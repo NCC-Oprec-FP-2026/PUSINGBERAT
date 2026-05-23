@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 )
@@ -25,7 +28,7 @@ func NewEngine(rules []RuleDefinition) *Engine {
 	}
 }
 
-func (e *Engine) Evaluate(ctx context.Context, event *domain.Event) ([]domain.Alert, error) {
+func (e *Engine) Evaluate(ctx context.Context, event *domain.ParsedEvent) ([]domain.Alert, error) {
 	if event == nil {
 		return nil, nil
 	}
@@ -59,9 +62,15 @@ func (e *Engine) Evaluate(ctx context.Context, event *domain.Event) ([]domain.Al
 	return alerts, nil
 }
 
-func (e *Engine) thresholdReached(rule RuleDefinition, event *domain.Event) bool {
-	window, err := time.ParseDuration(rule.Threshold.Window)
-	if err != nil || window <= 0 {
+func (e *Engine) thresholdReached(rule RuleDefinition, event *domain.ParsedEvent) bool {
+	window := time.Duration(rule.Threshold.WindowSeconds) * time.Second
+	if rule.Threshold.Window != "" {
+		parsed, err := time.ParseDuration(rule.Threshold.Window)
+		if err == nil {
+			window = parsed
+		}
+	}
+	if window <= 0 {
 		window = time.Minute
 	}
 
@@ -95,19 +104,21 @@ func (e *Engine) thresholdReached(rule RuleDefinition, event *domain.Event) bool
 	return len(kept) >= rule.Threshold.Count
 }
 
-func buildAlert(rule RuleDefinition, event *domain.Event) domain.Alert {
+func buildAlert(rule RuleDefinition, event *domain.ParsedEvent) domain.Alert {
 	title := rule.Alert.Title
 	if title == "" {
 		title = rule.Name
 	}
+	title = renderAlertTemplate(title, rule, event)
 
 	description := rule.Alert.Description
 	if description == "" {
 		description = rule.Description
 	}
+	description = renderAlertTemplate(description, rule, event)
 
-	var ruleID *string
-	if rule.DatabaseID != "" {
+	var ruleID *uuid.UUID
+	if rule.DatabaseID != uuid.Nil {
 		ruleID = &rule.DatabaseID
 	}
 
@@ -133,18 +144,25 @@ func buildAlert(rule RuleDefinition, event *domain.Event) domain.Alert {
 
 type AlertWriter interface {
 	Create(ctx context.Context, alert *domain.Alert) error
+	MarkDiscordSent(ctx context.Context, id uuid.UUID) error
+}
+
+type AlertNotifier interface {
+	Send(ctx context.Context, alert domain.Alert) error
 }
 
 type AlertDispatcher struct {
 	alerts     <-chan domain.Alert
 	writer     AlertWriter
+	notifier   AlertNotifier
 	downstream []chan<- domain.Alert
 }
 
-func NewAlertDispatcher(alerts <-chan domain.Alert, writer AlertWriter, downstream ...chan<- domain.Alert) *AlertDispatcher {
+func NewAlertDispatcher(alerts <-chan domain.Alert, writer AlertWriter, notifier AlertNotifier, downstream ...chan<- domain.Alert) *AlertDispatcher {
 	return &AlertDispatcher{
 		alerts:     alerts,
 		writer:     writer,
+		notifier:   notifier,
 		downstream: downstream,
 	}
 }
@@ -168,10 +186,45 @@ func (d *AlertDispatcher) Run(ctx context.Context) {
 				default:
 				}
 			}
+			if d.notifier == nil {
+				continue
+			}
+			if err := d.notifier.Send(ctx, alert); err != nil {
+				log.Printf("WARN: send discord notification failed alert=%s rule=%s: %v", alert.ID, alert.RuleName, err)
+				continue
+			}
+			if err := d.writer.MarkDiscordSent(ctx, alert.ID); err != nil {
+				log.Printf("WARN: mark discord sent failed alert=%s rule=%s: %v", alert.ID, alert.RuleName, err)
+			}
 		}
 	}
 }
 
 func FormatAlertLog(alert domain.Alert) string {
 	return fmt.Sprintf("[%s] %s", alert.Severity, alert.Title)
+}
+
+func renderAlertTemplate(template string, rule RuleDefinition, event *domain.ParsedEvent) string {
+	replacements := map[string]string{
+		"raw_line": event.RawLine,
+		"message":  fieldValue(event, "message"),
+		"hostname": fieldValue(event, "hostname"),
+		"host":     fieldValue(event, "hostname"),
+		"process":  fieldValue(event, "process"),
+		"pid":      fieldValue(event, "pid"),
+	}
+	if rule.Threshold != nil {
+		replacements["count"] = strconv.Itoa(rule.Threshold.Count)
+		if rule.Threshold.WindowSeconds > 0 {
+			replacements["window_seconds"] = strconv.Itoa(rule.Threshold.WindowSeconds)
+		} else if rule.Threshold.Window != "" {
+			replacements["window"] = rule.Threshold.Window
+		}
+	}
+
+	out := template
+	for key, value := range replacements {
+		out = strings.ReplaceAll(out, "{{"+key+"}}", value)
+	}
+	return out
 }

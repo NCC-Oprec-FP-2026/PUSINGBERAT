@@ -1,16 +1,20 @@
-name: Sudo Failure
-description: Detect failed sudo authentication attempts.
-severity: medium
+id: sudo-failure-001
+name: "Sudo Authentication Failure"
+description: "Detects failed sudo authentication attempts"
 enabled: true
+severity: medium
+
 log_types:
   - syslog
+
 conditions:
-  - field: process
-    operator: equals
-    value: sudo
   - field: message
-    operator: regex
-    value: "authentication failure|incorrect password"
+    operator: contains
+    value: "authentication failure"
+  - field: process
+    operator: contains
+    value: "sudo"
+
 alert:
-  title: Sudo authentication failure
-  description: A sudo authentication failure was observed.
+  title: "Sudo Failure on {{hostname}}"
+  description: "Unauthorized sudo attempt detected: {{message}}"

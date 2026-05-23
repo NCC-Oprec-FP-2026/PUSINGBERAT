@@ -80,3 +80,11 @@ func (s *AlertService) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// MarkDiscordSent marks an alert as delivered to Discord.
+func (s *AlertService) MarkDiscordSent(ctx context.Context, id uuid.UUID) error {
+	if err := s.repo.MarkDiscordSent(ctx, id); err != nil {
+		return fmt.Errorf("alertService.MarkDiscordSent: %w", err)
+	}
+	return nil
+}

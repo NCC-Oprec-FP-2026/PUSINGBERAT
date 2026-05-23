@@ -1,13 +1,17 @@
-name: Failed Login
-description: Detect a single failed authentication event.
-severity: medium
+id: failed-login-001
+name: "Failed Login Attempt"
+description: "Detects any authentication failure reported by PAM in syslog"
 enabled: true
+severity: medium
+
 log_types:
   - syslog
+
 conditions:
   - field: message
     operator: contains
-    value: Failed password
+    value: "authentication failure"
+
 alert:
-  title: Failed login detected
-  description: A failed password event was observed in syslog.
+  title: "Failed Login on {{hostname}}"
+  description: "Authentication failure detected: {{message}}"

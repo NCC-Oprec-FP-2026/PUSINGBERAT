@@ -43,15 +43,17 @@ func TestLogLineCreatesAlert(t *testing.T) {
 
 	alertChan := make(chan domain.Alert, 10)
 	alertService := service.NewAlertService(alertRepo)
-	dispatcher := ruleengine.NewAlertDispatcher(alertChan, alertService)
+	dispatcher := ruleengine.NewAlertDispatcher(alertChan, alertService, nil)
 	dispatcherCtx, stopDispatcher := context.WithCancel(ctx)
 	defer stopDispatcher()
 	go dispatcher.Run(dispatcherCtx)
 
 	engine := ruleengine.NewEngine(rules)
 	eventService := service.NewEventService(eventRepo, engine, alertChan)
-	registry := watcher.NewRegistry(eventService)
-	sourceService := service.NewLogSourceService(logSourceRepo, registry)
+	registry := watcher.NewRegistry(ctx)
+	eventService.StartPersistenceWorker(ctx, registry.EventChan())
+	sourceService := service.NewLogSourceService(logSourceRepo)
+	sourceService.SetRegistry(registry)
 
 	file, err := os.CreateTemp("", "pusingberat-rule-*.log")
 	if err != nil {
@@ -64,19 +66,19 @@ func TestLogLineCreatesAlert(t *testing.T) {
 	source := &domain.LogSource{
 		Name:     "integration-rule-" + time.Now().UTC().Format("20060102150405.000000000"),
 		FilePath: path,
-		LogType:  domain.LogSourceTypeSyslog,
+		LogType:  "syslog",
 		Status:   domain.LogSourceStatusActive,
 	}
 	if err := sourceService.Create(ctx, source); err != nil {
 		t.Fatalf("create source: %v", err)
 	}
 	defer func() {
-		registry.Stop(source.ID)
+		registry.RemoveWatcher(source.ID)
 		_ = logSourceRepo.Delete(context.Background(), source.ID)
 	}()
 
 	line := fmt.Sprintf(
-		"%s integration-host sshd[4321]: Failed password for invalid user root from 203.0.113.44 port 22 ssh2",
+		"%s integration-host login[4321]: pam_unix(login:auth): authentication failure; user=root",
 		time.Now().Format("Jan _2 15:04:05"),
 	)
 	if err := appendLine(path, line); err != nil {
@@ -85,12 +87,12 @@ func TestLogLineCreatesAlert(t *testing.T) {
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		alerts, _, err := alertRepo.List(ctx, repository.AlertFilter{Page: 1, PerPage: 100})
+		alerts, _, err := alertRepo.List(ctx, repository.AlertListParams{Limit: 100})
 		if err != nil {
 			t.Fatalf("list alerts: %v", err)
 		}
 		for _, alert := range alerts {
-			if alert.RawLine != nil && *alert.RawLine == line && alert.RuleName == "Failed Login" {
+			if alert.RawLine != nil && *alert.RawLine == line && alert.RuleName == "Failed Login Attempt" {
 				return
 			}
 		}

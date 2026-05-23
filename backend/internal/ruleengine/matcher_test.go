@@ -2,22 +2,29 @@ package ruleengine
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 )
 
-func testEvent() *domain.Event {
+func testEvent() *domain.ParsedEvent {
 	message := "Failed password for root from 10.0.0.1"
 	host := "web01"
 	process := "sshd"
-	pid := int32(1234)
+	pid := 1234
 	level := "warn"
+	extra, _ := json.Marshal(map[string]any{
+		"log_type": "syslog",
+		"status":   503,
+	})
 
-	return &domain.Event{
+	return &domain.ParsedEvent{
 		ID:          42,
-		LogSourceID: "source-1",
+		LogSourceID: uuid.MustParse("00000000-0000-0000-0000-000000000001"),
 		RawLine:     "May 21 10:00:00 web01 sshd[1234]: Failed password for root from 10.0.0.1",
 		Message:     &message,
 		Hostname:    &host,
@@ -25,10 +32,7 @@ func testEvent() *domain.Event {
 		PID:         &pid,
 		LogLevel:    &level,
 		EventTime:   time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
-		Extra: map[string]any{
-			"log_type": "syslog",
-			"status":   503,
-		},
+		Extra:       extra,
 	}
 }
 
@@ -114,9 +118,8 @@ func TestRuleLogTypeFiltering(t *testing.T) {
 
 func TestThresholdBelowAndAtBoundary(t *testing.T) {
 	rule := RuleDefinition{
-		Name:       "Boundary Rule",
-		DatabaseID: "rule-id",
-		Severity:   domain.SeverityHigh,
+		Name:     "Boundary Rule",
+		Severity: domain.SeverityHigh,
 		Conditions: []Condition{
 			{Field: "message", Operator: "contains", Value: "Failed password"},
 		},
@@ -152,9 +155,8 @@ func TestThresholdBelowAndAtBoundary(t *testing.T) {
 
 func TestThresholdOutsideWindowDoesNotAlert(t *testing.T) {
 	rule := RuleDefinition{
-		Name:       "Window Rule",
-		DatabaseID: "rule-id",
-		Severity:   domain.SeverityHigh,
+		Name:     "Window Rule",
+		Severity: domain.SeverityHigh,
 		Conditions: []Condition{
 			{Field: "message", Operator: "contains", Value: "Failed password"},
 		},

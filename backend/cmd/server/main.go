@@ -1,6 +1,4 @@
 // Package main is the single entrypoint for the PUSINGBERAT backend binary.
-// It wires dependencies together, sets up the Gin router, and starts the HTTP
-// server. No business logic lives here — only wiring and lifecycle management.
 package main
 
 import (
@@ -22,15 +20,16 @@ import (
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/api"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/api/handler"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/config"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/notifier"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/ruleengine"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/service"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/watcher"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/websocket"
 )
 
 func main() {
-	// ---------------------------------------------------------------
-	// 1. Load configuration from environment variables.
-	// ---------------------------------------------------------------
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("FATAL: %v\n", err)
@@ -39,18 +38,12 @@ func main() {
 	setupLogger(cfg.LogLevel)
 	slog.Info("config loaded", "server_addr", cfg.ServerAddress())
 
-	// ---------------------------------------------------------------
-	// 2. Set Gin mode based on log level.
-	// ---------------------------------------------------------------
 	if cfg.LogLevel == "debug" {
 		gin.SetMode(gin.DebugMode)
 	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	// ---------------------------------------------------------------
-	// 3. Connect to PostgreSQL.
-	// ---------------------------------------------------------------
 	pool, err := connectDB(cfg)
 	if err != nil {
 		log.Fatalf("FATAL: %v\n", err)
@@ -58,50 +51,56 @@ func main() {
 	defer pool.Close()
 	slog.Info("database connected", "host", cfg.DBHost, "db", cfg.DBName)
 
-	// ---------------------------------------------------------------
-	// 4. Wire dependency injection:
-	//    pgxpool → repos → services → handlers → router
-	// ---------------------------------------------------------------
-
-	// Repositories
 	logSourceRepo := repository.NewLogSourceRepo(pool)
 	eventRepo := repository.NewEventRepo(pool)
 	ruleRepo := repository.NewRuleRepo(pool)
 	alertRepo := repository.NewAlertRepo(pool)
 
-	// Services
-	logSourceSvc := service.NewLogSourceService(logSourceRepo)
-	eventSvc := service.NewEventService(eventRepo)
-	ruleSvc := service.NewRuleService(ruleRepo)
+	if err := ruleengine.SeedRules(context.Background(), ruleRepo, cfg.RulesDir); err != nil {
+		slog.Warn("seed rules failed", "err", err)
+	}
+	loadedRules, err := ruleengine.LoadEnabledRulesFromDB(context.Background(), ruleRepo)
+	if err != nil {
+		slog.Warn("load enabled rules failed", "err", err)
+	}
+	slog.Info("rule engine loaded", "rules", len(loadedRules))
+
+	alertChan := make(chan domain.Alert, 100)
+	wsAlertChan := make(chan domain.Alert, 100)
+	engine := ruleengine.NewEngine(loadedRules)
 	alertSvc := service.NewAlertService(alertRepo)
 
-	// Handlers
+	var discordNotifier ruleengine.AlertNotifier
+	if cfg.DiscordWebhookURL != "" {
+		discordNotifier = notifier.NewDiscordNotifier(cfg.DiscordWebhookURL)
+		slog.Info("discord notifier enabled")
+	} else {
+		slog.Info("discord notifier disabled", "reason", "DISCORD_WEBHOOK_URL is empty")
+	}
+
+	hub := websocket.NewHub()
+	go hub.Run(context.Background())
+	go forwardAlertsToWebsocket(context.Background(), wsAlertChan, hub)
+
+	dispatcher := ruleengine.NewAlertDispatcher(alertChan, alertSvc, discordNotifier, wsAlertChan)
+	go dispatcher.Run(context.Background())
+
+	logSourceSvc := service.NewLogSourceService(logSourceRepo)
+	eventSvc := service.NewEventService(eventRepo, engine, alertChan)
+	ruleSvc := service.NewRuleService(ruleRepo)
+
 	logSourceHandler := handler.NewLogSourceHandler(logSourceSvc)
 	eventHandler := handler.NewEventHandler(eventSvc)
 	ruleHandler := handler.NewRuleHandler(ruleSvc)
 	alertHandler := handler.NewAlertHandler(alertSvc)
 
-	// ---------------------------------------------------------------
-	// 5. Watcher Pipeline — file watching + event persistence.
-	// ---------------------------------------------------------------
-
-	// Create a cancellable context for the entire watcher pipeline.
-	// Cancelling watcherCancel stops all file watchers and the
-	// persistence worker.
 	watcherCtx, watcherCancel := context.WithCancel(context.Background())
 	defer watcherCancel()
 
-	// Create the watcher registry.
 	registry := watcher.NewRegistry(watcherCtx)
-
-	// Attach the registry to the LogSourceService so that Create/Delete
-	// automatically start/stop watchers.
 	logSourceSvc.SetRegistry(registry)
-
-	// Start the event persistence worker (background goroutine).
 	eventSvc.StartPersistenceWorker(watcherCtx, registry.EventChan())
 
-	// Load all existing active log sources and start watching them.
 	bootSources, err := logSourceSvc.List(context.Background())
 	if err != nil {
 		slog.Error("failed to load log sources at boot", "err", err)
@@ -113,23 +112,16 @@ func main() {
 		)
 	}
 
-	// ---------------------------------------------------------------
-	// 6. Build the router with all handlers and middleware injected.
-	// ---------------------------------------------------------------
-	corsOrigins := parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS"))
-
 	router := api.NewRouter(api.RouterDeps{
 		LogSource:   logSourceHandler,
 		Event:       eventHandler,
 		Rule:        ruleHandler,
 		Alert:       alertHandler,
 		Pool:        pool,
-		CORSOrigins: corsOrigins,
+		CORSOrigins: parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")),
 	})
+	router.GET("/ws", hub.Handle)
 
-	// ---------------------------------------------------------------
-	// 7. Start the HTTP server with graceful shutdown.
-	// ---------------------------------------------------------------
 	srv := &http.Server{
 		Addr:         cfg.ServerAddress(),
 		Handler:      router,
@@ -146,9 +138,6 @@ func main() {
 		}
 	}()
 
-	// ---------------------------------------------------------------
-	// 8. Block until OS signal or fatal server error.
-	// ---------------------------------------------------------------
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -159,16 +148,9 @@ func main() {
 		log.Fatalf("FATAL: %v", err)
 	}
 
-	// ---------------------------------------------------------------
-	// 9. Graceful shutdown sequence:
-	//    a) Stop all file watchers (cancel watcherCtx)
-	//    b) Shutdown HTTP server (drain in-flight requests)
-	//    c) Pool.Close() runs via defer
-	// ---------------------------------------------------------------
 	slog.Info("stopping watcher pipeline")
 	watcherCancel()
 
-	// Give in-flight requests up to 10 seconds to complete.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -179,11 +161,6 @@ func main() {
 	slog.Info("server stopped cleanly")
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// connectDB creates a pgxpool connection pool and verifies connectivity.
 func connectDB(cfg *config.Config) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -192,31 +169,41 @@ func connectDB(cfg *config.Config) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection pool: %w", err)
 	}
-
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("unable to ping database: %w", err)
 	}
-
 	return pool, nil
 }
 
-// parseCORSOrigins splits a comma-separated list of origins into a slice.
+func forwardAlertsToWebsocket(ctx context.Context, alerts <-chan domain.Alert, hub *websocket.Hub) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case alert, ok := <-alerts:
+			if !ok {
+				return
+			}
+			hub.BroadcastAlert(alert)
+		}
+	}
+}
+
 func parseCORSOrigins(raw string) []string {
 	if raw == "" {
 		return []string{"http://localhost:5173", "http://localhost:5000"}
 	}
 	parts := strings.Split(raw, ",")
 	origins := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if trimmed := strings.TrimSpace(p); trimmed != "" {
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
 			origins = append(origins, trimmed)
 		}
 	}
 	return origins
 }
 
-// setupLogger configures the global slog default based on the log level.
 func setupLogger(level string) {
 	var lvl slog.Level
 	switch strings.ToLower(level) {

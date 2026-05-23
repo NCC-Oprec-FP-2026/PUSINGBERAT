@@ -9,28 +9,29 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	"github.com/google/uuid"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
-	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
 )
 
 type RuleRepository interface {
 	Create(ctx context.Context, rule *domain.Rule) error
-	GetByName(ctx context.Context, name string) (*domain.Rule, error)
-	List(ctx context.Context, filter repository.RuleFilter) ([]domain.Rule, int64, error)
+	List(ctx context.Context) ([]domain.Rule, error)
+	ListEnabled(ctx context.Context) ([]domain.Rule, error)
 }
 
 type RuleDefinition struct {
-	DatabaseID  string          `yaml:"-"`
-	Name        string          `yaml:"name"`
-	Description string          `yaml:"description"`
-	Severity    domain.Severity `yaml:"severity"`
-	Enabled     *bool           `yaml:"enabled"`
-	LogTypes    []string        `yaml:"log_types"`
-	Conditions  []Condition     `yaml:"conditions"`
-	Threshold   *Threshold      `yaml:"threshold"`
-	Alert       AlertTemplate   `yaml:"alert"`
-	yamlContent string          `yaml:"-"`
+	DatabaseID  uuid.UUID            `yaml:"-"`
+	ID          string               `yaml:"id"`
+	Name        string               `yaml:"name"`
+	Description string               `yaml:"description"`
+	Severity    domain.SeverityLevel `yaml:"severity"`
+	Enabled     *bool                `yaml:"enabled"`
+	LogTypes    []string             `yaml:"log_types"`
+	Conditions  []Condition          `yaml:"conditions"`
+	Threshold   *Threshold           `yaml:"threshold"`
+	Alert       AlertTemplate        `yaml:"alert"`
+	yamlContent string               `yaml:"-"`
 }
 
 type Condition struct {
@@ -40,9 +41,10 @@ type Condition struct {
 }
 
 type Threshold struct {
-	Count   int    `yaml:"count"`
-	Window  string `yaml:"window"`
-	GroupBy string `yaml:"group_by"`
+	Count         int    `yaml:"count"`
+	Window        string `yaml:"window"`
+	WindowSeconds int    `yaml:"window_seconds"`
+	GroupBy       string `yaml:"group_by"`
 }
 
 type AlertTemplate struct {
@@ -104,13 +106,18 @@ func SeedRules(ctx context.Context, repo RuleRepository, dir string) error {
 		return err
 	}
 
+	existingRules, err := repo.List(ctx)
+	if err != nil {
+		return err
+	}
+	existingByName := make(map[string]struct{}, len(existingRules))
+	for _, rule := range existingRules {
+		existingByName[strings.ToLower(strings.TrimSpace(rule.Name))] = struct{}{}
+	}
+
 	for _, rule := range rules {
-		_, err := repo.GetByName(ctx, rule.Name)
-		if err == nil {
+		if _, exists := existingByName[strings.ToLower(strings.TrimSpace(rule.Name))]; exists {
 			continue
-		}
-		if !errors.Is(err, repository.ErrNotFound) {
-			return err
 		}
 
 		enabled := true
@@ -129,18 +136,14 @@ func SeedRules(ctx context.Context, repo RuleRepository, dir string) error {
 		if err := repo.Create(ctx, dbRule); err != nil {
 			return err
 		}
+		existingByName[strings.ToLower(strings.TrimSpace(rule.Name))] = struct{}{}
 	}
 
 	return nil
 }
 
 func LoadEnabledRulesFromDB(ctx context.Context, repo RuleRepository) ([]RuleDefinition, error) {
-	enabled := true
-	dbRules, _, err := repo.List(ctx, repository.RuleFilter{
-		Enabled: &enabled,
-		Page:    1,
-		PerPage: 200,
-	})
+	dbRules, err := repo.ListEnabled(ctx)
 	if err != nil {
 		return nil, err
 	}
