@@ -1,67 +1,61 @@
 // ============================================================
 // Jenkinsfile — PUSINGBERAT SIEM CI Pipeline
 // ============================================================
-// Triggered by: GitHub webhook on push to 'feature/day5-discord-merged', 'develop', or 'main'.
+// Triggered by: GitHub webhook on push to any branch.
+//
+// Job type: Pipeline (bukan Multibranch Pipeline).
+// Karena itu BRANCH_NAME tidak tersedia secara otomatis.
+// Gantinya kita gunakan GIT_BRANCH (diisi oleh Git plugin)
+// yang nilainya berformat "origin/feature/day5-discord-merged".
 //
 // Stages:
-//   1. Checkout        — clone source from GitHub
-//   2. Go: Lint        — run go vet (fast static check)
+//   1. Checkout        — clone source dari GitHub
+//   2. Go: Lint        — go vet (fast static check)
 //   3. Go: Test        — go test + coverage.out
-//   4. SonarQube Scan  — analyse Go + Vue 3 source
-//   5. Quality Gate    — wait for SonarQube pass/fail
-//   6. Docker Build    — build production image (backend)
+//   4. SonarQube Scan  — analisa Go + Vue 3
+//   5. Quality Gate    — tunggu hasil SonarQube
+//   6. Docker Build    — build image production (backend)
 //
-// Jenkins credentials required (configure in Manage Credentials):
-//   - sonarqube-token    → Secret Text — SonarQube user token
-//   - github-credentials → Username/Password or SSH key (if private repo)
+// Jenkins credentials (Manage Credentials → Global):
+//   - sonarqube-token    → Secret Text — token dari SonarQube
 //
-// Jenkins tools required (configure in Manage Jenkins → Tools):
-//   - Go installation named "go-1.25"
-//     (or use the docker agent below and remove the 'tools' block)
-//   - SonarQube Scanner named "sonar-scanner"
-//   - SonarQube Server named "sonarserver" in Manage Jenkins → System
+// Jenkins tools (Manage Jenkins → Tools):
+//   - Go:             nama "go-1.25"
+//   - Sonar Scanner:  nama "sonar-scanner"
+//
+// Jenkins system (Manage Jenkins → System → SonarQube servers):
+//   - nama server: "sonarserver"
 // ============================================================
 
 pipeline {
     agent any
 
-    // ── Tool definitions ──────────────────────────────────────
-    // These names must match what you configured in
-    // Manage Jenkins → Tools.
+    // ── Tools ────────────────────────────────────────────────
     tools {
         go 'go-1.25'
     }
 
-    // ── Trigger: run on feature/day5-discord-merged, develop, and main ─
+    // ── Trigger ───────────────────────────────────────────────
     triggers {
         githubPush()
     }
 
-    // ── Environment variables ─────────────────────────────────
+    // ── Environment ───────────────────────────────────────────
     environment {
-        // Docker image name for the backend.
         IMAGE_NAME    = 'pusingberat-backend'
         IMAGE_TAG     = "${env.GIT_COMMIT?.take(7) ?: 'latest'}"
-
-        // Go module path — matches go.mod module declaration.
-        GO_MODULE     = 'github.com/NCC-Oprec-FP-2026/PUSINGBERAT'
-
-        // Path to Go coverage report (relative to workspace root).
         COVERAGE_FILE = 'backend/coverage.out'
 
-        // SonarQube scanner binary name.
-        SONAR_SCANNER = 'sonar-scanner'
+        // GIT_BRANCH diisi Git plugin: "origin/feature/day5-discord-merged"
+        // Kita normalisasi jadi "feature/day5-discord-merged" untuk perbandingan.
+        BRANCH_CLEAN  = "${env.GIT_BRANCH?.replaceFirst('origin/', '') ?: 'unknown'}"
     }
 
-    // ── Pipeline options ──────────────────────────────────────
+    // ── Options ───────────────────────────────────────────────
     options {
-        // Abort the build if it runs longer than 20 minutes.
         timeout(time: 20, unit: 'MINUTES')
-        // Keep only the last 10 builds to save disk space.
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        // Discard concurrent builds for the same branch.
         disableConcurrentBuilds()
-        // Prepend all log lines with a timestamp.
         timestamps()
     }
 
@@ -71,20 +65,19 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo "✅ Checked out branch: ${env.BRANCH_NAME} @ ${env.GIT_COMMIT?.take(7)}"
+                // Tampilkan info branch yang sedang diproses.
+                // GIT_BRANCH tersedia setelah checkout SCM.
+                echo "✅ Branch: ${env.GIT_BRANCH} (clean: ${env.BRANCH_CLEAN}) @ ${env.GIT_COMMIT?.take(7)}"
             }
         }
 
-        // ── Stage 2: Go Lint ─────────────────────────────────
-        // go vet catches suspicious constructs (printf format
-        // mismatches, unreachable code, etc.) without external tools.
+        // ── Stage 2: Go Lint ──────────────────────────────────
+        // go vet menangkap masalah umum Go tanpa external tool.
         stage('Go: Lint') {
             when {
-                anyOf {
-                    branch 'develop'
-                    branch 'main'
-                    branch pattern: 'feature/day5-discord-merged', comparator: 'EQUALS'
-                    changeRequest()
+                expression {
+                    def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
+                    return b in ['develop', 'main', 'feature/day5-discord-merged']
                 }
             }
             steps {
@@ -99,21 +92,17 @@ pipeline {
         }
 
         // ── Stage 3: Go Test + Coverage ───────────────────────
-        // Runs all unit tests and integration tests.
-        // Produces coverage.out consumed later by SonarQube.
+        // Menghasilkan coverage.out yang dikonsumsi oleh SonarQube.
         //
-        // NOTE: Integration tests (integration_test.go) require a
-        // running PostgreSQL instance. If Jenkins does NOT have one,
-        // use the build tag below to skip them:
+        // NOTE: integration_test.go membutuhkan PostgreSQL.
+        // Jika Jenkins tidak punya Postgres, tambahkan -tags=unit
+        // untuk melewati integration test sementara:
         //   go test -tags=unit -coverprofile=coverage.out ./...
-        // Remove `-tags=unit` once you wire up a test DB service.
         stage('Go: Test & Coverage') {
             when {
-                anyOf {
-                    branch 'develop'
-                    branch 'main'
-                    branch pattern: 'feature/day5-discord-merged', comparator: 'EQUALS'
-                    changeRequest()
+                expression {
+                    def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
+                    return b in ['develop', 'main', 'feature/day5-discord-merged']
                 }
             }
             steps {
@@ -139,55 +128,50 @@ pipeline {
             }
             post {
                 always {
-                    // Archive coverage report so it's visible in Jenkins UI.
                     archiveArtifacts artifacts: 'backend/coverage.out', allowEmptyArchive: true
                 }
             }
         }
 
         // ── Stage 4: SonarQube Analysis ───────────────────────
-        // Sends source + coverage data to SonarQube for analysis.
-        // Requires:
-        //   - A SonarQube Server named "sonarqube" configured in
-        //     Manage Jenkins → System → SonarQube servers.
-        //   - A credential ID "sonarqube-token" (Secret Text).
-        //   - The SonarQube Scanner plugin installed.
+        // withSonarQubeEnv meng-inject SONAR_HOST_URL dan
+        // SONAR_AUTH_TOKEN dari server yang dikonfigurasi di Jenkins.
+        // sonar-scanner membaca sonar-project.properties dari root repo.
         stage('SonarQube Analysis') {
             when {
-                anyOf {
-                    branch 'develop'
-                    branch 'main'
-                    branch pattern: 'feature/day5-discord-merged', comparator: 'EQUALS'
-                    changeRequest()
+                expression {
+                    def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
+                    return b in ['develop', 'main', 'feature/day5-discord-merged']
                 }
             }
             steps {
-                // withSonarQubeEnv injects SONAR_HOST_URL and
-                // SONAR_AUTH_TOKEN from the configured server.
                 withSonarQubeEnv('sonarserver') {
-                    sh '''
-                        echo "→ Running SonarQube scanner..."
-                        sonar-scanner \
-                            -Dsonar.branch.name=${BRANCH_NAME} \
-                            -Dsonar.go.coverage.reportPaths=backend/coverage.out
+                    // Gunakan tool sonar-scanner yang dikonfigurasi di Jenkins.
+                    // Ini memastikan binary ditemukan meskipun tidak ada di PATH.
+                    script {
+                        def scannerHome = tool 'sonarqube8.0'
+                        def branchName = env.GIT_BRANCH?.replaceFirst('origin/', '') ?: 'unknown'
+                        sh """
+                            echo "→ Running SonarQube scanner (branch: ${branchName})..."
+                            ${scannerHome}/bin/sonar-scanner \
+                                -Dsonar.branch.name=${branchName} \
+                                -Dsonar.go.coverage.reportPaths=backend/coverage.out
 
-                        echo "✅ SonarQube scan submitted"
-                    '''
+                            echo "✅ SonarQube scan submitted"
+                        """
+                    }
                 }
             }
         }
 
-        // ── Stage 5: Quality Gate ────────────────────────────
-        // Polls SonarQube until the analysis is complete, then
-        // fails the pipeline if the Quality Gate is not passed.
-        // The 5-minute timeout is a safeguard against Sonar being slow.
+        // ── Stage 5: Quality Gate ─────────────────────────────
+        // Poll SonarQube sampai analisis selesai.
+        // Pipeline gagal jika Quality Gate tidak passed.
         stage('Quality Gate') {
             when {
-                anyOf {
-                    branch 'develop'
-                    branch 'main'
-                    branch pattern: 'feature/day5-discord-merged', comparator: 'EQUALS'
-                    changeRequest()
+                expression {
+                    def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
+                    return b in ['develop', 'main', 'feature/day5-discord-merged']
                 }
             }
             steps {
@@ -198,15 +182,13 @@ pipeline {
         }
 
         // ── Stage 6: Docker Build ─────────────────────────────
-        // Delegates to docker-compose.prod.yml so the build config
-        // stays in one place (Dockerfile path, context, env defaults).
-        // Only runs on develop and main — not on feature branches.
+        // Build production image via docker-compose.prod.yml.
+        // docker-compose.prod.yml → backend/Dockerfile (multi-stage).
         stage('Docker Build') {
             when {
-                anyOf {
-                    branch 'develop'
-                    branch 'main'
-                    branch pattern: 'feature/day5-discord-merged', comparator: 'EQUALS'
+                expression {
+                    def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
+                    return b in ['develop', 'main', 'feature/day5-discord-merged']
                 }
             }
             steps {
@@ -228,13 +210,13 @@ pipeline {
 
     }
 
-    // ── Post-pipeline notifications ───────────────────────────
+    // ── Post ─────────────────────────────────────────────────
     post {
         success {
             echo """
             ============================================
             ✅ Pipeline PASSED
-            Branch : ${env.BRANCH_NAME}
+            Branch : ${env.GIT_BRANCH}
             Commit : ${env.GIT_COMMIT?.take(7)}
             Build  : #${env.BUILD_NUMBER}
             ============================================
@@ -244,14 +226,13 @@ pipeline {
             echo """
             ============================================
             ❌ Pipeline FAILED
-            Branch : ${env.BRANCH_NAME}
+            Branch : ${env.GIT_BRANCH}
             Commit : ${env.GIT_COMMIT?.take(7)}
             Build  : #${env.BUILD_NUMBER}
             ============================================
             """
         }
         always {
-            // Clean up workspace to avoid disk bloat on the Jenkins agent.
             cleanWs()
         }
     }
