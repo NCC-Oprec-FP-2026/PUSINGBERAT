@@ -41,7 +41,7 @@ func (h *StatsHandler) Overview(c *gin.Context) {
 			(SELECT COUNT(*) FROM log_sources WHERE status = 'active')
 	`).Scan(&totalEvents24h, &totalAlerts24h, &criticalAlerts, &activeSources)
 	if err != nil {
-		writeServiceError(c, err)
+		respondError(c, err)
 		return
 	}
 
@@ -64,7 +64,7 @@ func (h *StatsHandler) EventsTimeline(c *gin.Context) {
 		ORDER BY bucket ASC
 	`)
 	if err != nil {
-		writeServiceError(c, err)
+		respondError(c, err)
 		return
 	}
 	defer rows.Close()
@@ -81,7 +81,7 @@ func (h *StatsHandler) EventsTimeline(c *gin.Context) {
 		}, nil
 	})
 	if err != nil {
-		writeServiceError(c, err)
+		respondError(c, err)
 		return
 	}
 
@@ -96,7 +96,7 @@ func (h *StatsHandler) AlertsBySeverity(c *gin.Context) {
 		ORDER BY severity
 	`)
 	if err != nil {
-		writeServiceError(c, err)
+		respondError(c, err)
 		return
 	}
 	defer rows.Close()
@@ -113,7 +113,7 @@ func (h *StatsHandler) AlertsBySeverity(c *gin.Context) {
 		}, nil
 	})
 	if err != nil {
-		writeServiceError(c, err)
+		respondError(c, err)
 		return
 	}
 
@@ -130,7 +130,7 @@ func (h *StatsHandler) TopSources(c *gin.Context) {
 		LIMIT 5
 	`)
 	if err != nil {
-		writeServiceError(c, err)
+		respondError(c, err)
 		return
 	}
 	defer rows.Close()
@@ -149,7 +149,7 @@ func (h *StatsHandler) TopSources(c *gin.Context) {
 		}, nil
 	})
 	if err != nil {
-		writeServiceError(c, err)
+		respondError(c, err)
 		return
 	}
 

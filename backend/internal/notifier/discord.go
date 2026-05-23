@@ -114,7 +114,7 @@ func discordPayloadFromAlert(alert domain.Alert) discordPayload {
 		{Name: "Rule", Value: alert.RuleName, Inline: true},
 	}
 	if alert.LogSourceID != nil {
-		fields = append(fields, discordField{Name: "Log Source", Value: *alert.LogSourceID, Inline: true})
+		fields = append(fields, discordField{Name: "Log Source", Value: alert.LogSourceID.String(), Inline: true})
 	}
 	if alert.RawLine != nil && *alert.RawLine != "" {
 		fields = append(fields, discordField{Name: "Raw Line", Value: truncateDiscordValue(*alert.RawLine), Inline: false})
