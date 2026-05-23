@@ -1,0 +1,35 @@
+# =============================================================================
+# Sudo Authentication Failure
+# =============================================================================
+# Fires immediately when a sudo authentication failure is detected.
+# Matches syslog lines where the process contains "sudo" and the message
+# indicates an authentication failure.  No threshold — every occurrence
+# is surfaced because unauthorized privilege escalation attempts deserve
+# immediate visibility.
+#
+# Example matching line:
+#   May 22 15:20:10 appserver sudo[9012]: pam_unix(sudo:auth): authentication failure; user=developer
+# =============================================================================
+
+id: sudo-failure-001
+name: "Sudo Authentication Failure"
+description: "Detects failed sudo authentication attempts"
+enabled: true
+severity: medium
+
+log_types:
+  - syslog
+
+conditions:
+  - field: message
+    operator: contains
+    value: "authentication failure"
+  - field: process
+    operator: contains
+    value: "sudo"
+
+# No threshold — fires on every match.
+
+alert:
+  title: "Sudo Failure on {{hostname}}"
+  description: "Unauthorized sudo attempt detected: {{message}}"
