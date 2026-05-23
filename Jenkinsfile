@@ -154,7 +154,6 @@ pipeline {
                         sh """
                             echo "→ Running SonarQube scanner (branch: ${branchName})..."
                             ${scannerHome}/bin/sonar-scanner \
-                                -Dsonar.branch.name=${branchName} \
                                 -Dsonar.go.coverage.reportPaths=backend/coverage.out
 
                             echo "✅ SonarQube scan submitted"
