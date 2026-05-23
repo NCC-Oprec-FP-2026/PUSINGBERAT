@@ -2,189 +2,168 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/google/uuid"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
-	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
-	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/service"
 )
 
+// ---------------------------------------------------------------------------
+// Service interface (consumed by LogSourceHandler)
+// ---------------------------------------------------------------------------
+
+// LogSourceService defines the business-logic contract that the handler calls.
 type LogSourceService interface {
-	Create(ctx context.Context, source *domain.LogSource) error
-	GetByID(ctx context.Context, id string) (*domain.LogSource, error)
-	List(ctx context.Context, filter repository.LogSourceFilter) ([]domain.LogSource, int64, error)
-	Update(ctx context.Context, source *domain.LogSource) error
-	Delete(ctx context.Context, id string) error
+	Create(ctx context.Context, ls *domain.LogSource) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.LogSource, error)
+	List(ctx context.Context) ([]domain.LogSource, error)
+	Update(ctx context.Context, ls *domain.LogSource) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
+// LogSourceHandler handles HTTP requests for the /sources endpoints.
 type LogSourceHandler struct {
-	service LogSourceService
+	svc LogSourceService
 }
 
-func NewLogSourceHandler(service LogSourceService) *LogSourceHandler {
-	return &LogSourceHandler{service: service}
+// NewLogSourceHandler constructs a LogSourceHandler with the given service.
+func NewLogSourceHandler(svc LogSourceService) *LogSourceHandler {
+	return &LogSourceHandler{svc: svc}
 }
 
-func (h *LogSourceHandler) RegisterRoutes(group *gin.RouterGroup) {
-	group.GET("/sources", h.List)
-	group.POST("/sources", h.Create)
-	group.GET("/sources/:id", h.GetByID)
-	group.PATCH("/sources/:id", h.Update)
-	group.DELETE("/sources/:id", h.Delete)
-}
-
+// createLogSourceRequest is the JSON body for POST /sources.
 type createLogSourceRequest struct {
-	Name        string                 `json:"name"`
-	FilePath    string                 `json:"file_path"`
-	LogType     domain.LogSourceType   `json:"log_type"`
-	Status      domain.LogSourceStatus `json:"status"`
-	Description *string                `json:"description"`
+	Name        string  `json:"name"`
+	FilePath    string  `json:"file_path"`
+	LogType     string  `json:"log_type"`
+	Description *string `json:"description,omitempty"`
 }
 
+// updateLogSourceRequest is the JSON body for PATCH /sources/:id.
+type updateLogSourceRequest struct {
+	Name        *string `json:"name,omitempty"`
+	FilePath    *string `json:"file_path,omitempty"`
+	LogType     *string `json:"log_type,omitempty"`
+	Status      *string `json:"status,omitempty"`
+	Description *string `json:"description,omitempty"`
+}
+
+// Create handles POST /api/v1/sources.
 func (h *LogSourceHandler) Create(c *gin.Context) {
 	var req createLogSourceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "invalid JSON body",
-		})
+		respondBadRequest(c, "invalid JSON body: "+err.Error())
 		return
 	}
 
-	source := &domain.LogSource{
+	ls := &domain.LogSource{
 		Name:        req.Name,
 		FilePath:    req.FilePath,
 		LogType:     req.LogType,
-		Status:      req.Status,
 		Description: req.Description,
 	}
 
-	if err := h.service.Create(c.Request.Context(), source); err != nil {
-		writeServiceError(c, err)
+	if err := h.svc.Create(c.Request.Context(), ls); err != nil {
+		respondError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"data": source,
-	})
+	respondData(c, http.StatusCreated, ls)
 }
 
+// GetByID handles GET /api/v1/sources/:id.
 func (h *LogSourceHandler) GetByID(c *gin.Context) {
-	source, err := h.service.GetByID(c.Request.Context(), c.Param("id"))
+	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		writeServiceError(c, err)
+		respondBadRequest(c, "invalid UUID")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": source,
-	})
+	ls, err := h.svc.GetByID(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+
+	respondData(c, http.StatusOK, ls)
 }
 
+// List handles GET /api/v1/sources.
 func (h *LogSourceHandler) List(c *gin.Context) {
-	filter := repository.LogSourceFilter{
-		Status:  domain.LogSourceStatus(c.Query("status")),
-		LogType: domain.LogSourceType(c.Query("log_type")),
-		Search:  c.Query("search"),
-		Page:    intQuery(c, "page", 1),
-		PerPage: intQuery(c, "per_page", 50),
-	}
-
-	sources, total, err := h.service.List(c.Request.Context(), filter)
+	sources, err := h.svc.List(c.Request.Context())
 	if err != nil {
-		writeServiceError(c, err)
+		respondError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": sources,
-		"meta": gin.H{
-			"total":    total,
-			"page":     filter.Page,
-			"per_page": filter.PerPage,
-		},
-	})
+	// LogSources are few enough that full pagination is unnecessary.
+	respondList(c, sources, int64(len(sources)), 1, len(sources))
 }
 
+// Update handles PATCH /api/v1/sources/:id.
 func (h *LogSourceHandler) Update(c *gin.Context) {
-	var req createLogSourceRequest
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondBadRequest(c, "invalid UUID")
+		return
+	}
+
+	// Fetch existing entity to apply partial updates.
+	existing, err := h.svc.GetByID(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+
+	var req updateLogSourceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "invalid JSON body",
-		})
+		respondBadRequest(c, "invalid JSON body: "+err.Error())
 		return
 	}
 
-	source := &domain.LogSource{
-		ID:          c.Param("id"),
-		Name:        req.Name,
-		FilePath:    req.FilePath,
-		LogType:     req.LogType,
-		Status:      req.Status,
-		Description: req.Description,
+	// Apply only the fields that the client sent.
+	if req.Name != nil {
+		existing.Name = *req.Name
+	}
+	if req.FilePath != nil {
+		existing.FilePath = *req.FilePath
+	}
+	if req.LogType != nil {
+		existing.LogType = *req.LogType
+	}
+	if req.Status != nil {
+		existing.Status = domain.LogSourceStatus(*req.Status)
+	}
+	if req.Description != nil {
+		existing.Description = req.Description
 	}
 
-	if err := h.service.Update(c.Request.Context(), source); err != nil {
-		writeServiceError(c, err)
+	if err := h.svc.Update(c.Request.Context(), existing); err != nil {
+		respondError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": source,
-	})
+	respondData(c, http.StatusOK, existing)
 }
 
+// Delete handles DELETE /api/v1/sources/:id.
 func (h *LogSourceHandler) Delete(c *gin.Context) {
-	if err := h.service.Delete(c.Request.Context(), c.Param("id")); err != nil {
-		writeServiceError(c, err)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		respondBadRequest(c, "invalid UUID")
+		return
+	}
+
+	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
+		respondError(c, err)
 		return
 	}
 
 	c.Status(http.StatusNoContent)
-}
-
-func intQuery(c *gin.Context, key string, fallback int) int {
-	raw := c.Query(key)
-	if raw == "" {
-		return fallback
-	}
-
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return fallback
-	}
-	return value
-}
-
-func writeServiceError(c *gin.Context, err error) {
-	var pgErr *pgconn.PgError
-
-	switch {
-	case errors.Is(err, service.ErrValidation):
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": err.Error(),
-		})
-	case errors.As(err, &pgErr) && pgErr.Code == "23505":
-		c.JSON(http.StatusConflict, gin.H{
-			"status":  "error",
-			"message": "resource already exists",
-		})
-	case errors.Is(err, repository.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{
-			"status":  "error",
-			"message": "resource not found",
-		})
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "internal server error",
-		})
-	}
 }

@@ -2,217 +2,148 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 )
 
-type EventFilter struct {
-	SourceID string
-	Level    string
-	From     *time.Time
-	To       *time.Time
-	Search   string
-	Page     int
-	PerPage  int
-}
-
+// EventRepo provides CRUD operations for the events table.
 type EventRepo struct {
-	db *pgxpool.Pool
+	pool *pgxpool.Pool
 }
 
-func NewEventRepo(db *pgxpool.Pool) *EventRepo {
-	return &EventRepo{db: db}
+// NewEventRepo creates a new EventRepo backed by the given connection pool.
+func NewEventRepo(pool *pgxpool.Pool) *EventRepo {
+	return &EventRepo{pool: pool}
 }
 
-func (r *EventRepo) Create(ctx context.Context, event *domain.Event) error {
-	extra, err := marshalJSONB(event.Extra)
-	if err != nil {
-		return fmt.Errorf("marshal event extra: %w", err)
+// Create inserts a new ParsedEvent. The ID and ReceivedAt columns are
+// populated by PostgreSQL (BIGSERIAL / DEFAULT NOW()) and scanned back.
+func (r *EventRepo) Create(ctx context.Context, ev *domain.ParsedEvent) error {
+	query := `
+		INSERT INTO events (log_source_id, raw_line, message, hostname, process, pid, log_level, event_time, extra)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, received_at`
+
+	// Default nil Extra to an empty JSON object so the NOT NULL constraint
+	// is satisfied. PostgreSQL's column DEFAULT only applies when the column
+	// is omitted from the INSERT — explicitly passing NULL triggers a
+	// constraint violation.
+	extra := ev.Extra
+	if extra == nil {
+		extra = []byte(`{}`)
 	}
 
-	const query = `
-		INSERT INTO events (
-			log_source_id,
-			raw_line,
-			message,
-			hostname,
-			process,
-			pid,
-			log_level,
-			event_time,
-			extra
-		)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, received_at
-	`
-
-	err = r.db.QueryRow(
-		ctx,
-		query,
-		event.LogSourceID,
-		event.RawLine,
-		event.Message,
-		event.Hostname,
-		event.Process,
-		event.PID,
-		event.LogLevel,
-		event.EventTime,
+	err := r.pool.QueryRow(ctx, query,
+		ev.LogSourceID,
+		ev.RawLine,
+		ev.Message,
+		ev.Hostname,
+		ev.Process,
+		ev.PID,
+		ev.LogLevel,
+		ev.EventTime,
 		extra,
-	).Scan(&event.ID, &event.ReceivedAt)
-	if err != nil {
-		return fmt.Errorf("create event: %w", err)
-	}
+	).Scan(&ev.ID, &ev.ReceivedAt)
 
+	if err != nil {
+		return fmt.Errorf("eventRepo.Create: %w", err)
+	}
 	return nil
 }
 
-func (r *EventRepo) GetByID(ctx context.Context, id int64) (*domain.Event, error) {
-	const query = `
-		SELECT id, log_source_id::text, raw_line, message, hostname, process, pid,
-			log_level, event_time, received_at, extra
+// GetByID retrieves a single event by its BIGSERIAL primary key.
+func (r *EventRepo) GetByID(ctx context.Context, id int64) (*domain.ParsedEvent, error) {
+	query := `
+		SELECT id, log_source_id, raw_line, message, hostname, process, pid,
+		       log_level, event_time, received_at, extra
 		FROM events
-		WHERE id = $1
-	`
+		WHERE id = $1`
 
-	event, err := scanEvent(r.db.QueryRow(ctx, query, id))
+	ev := &domain.ParsedEvent{}
+	err := r.pool.QueryRow(ctx, query, id).Scan(
+		&ev.ID,
+		&ev.LogSourceID,
+		&ev.RawLine,
+		&ev.Message,
+		&ev.Hostname,
+		&ev.Process,
+		&ev.PID,
+		&ev.LogLevel,
+		&ev.EventTime,
+		&ev.ReceivedAt,
+		&ev.Extra,
+	)
 	if err != nil {
-		return nil, notFound(err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, fmt.Errorf("eventRepo.GetByID: %w", err)
 	}
-	return event, nil
+	return ev, nil
 }
 
-func (r *EventRepo) List(ctx context.Context, filter EventFilter) ([]domain.Event, int64, error) {
-	clauses, args := buildEventWhere(filter)
-	where := whereSQL(clauses)
+// ListParams holds optional filter/pagination parameters for List.
+type EventListParams struct {
+	Limit  int
+	Offset int
+}
 
-	var total int64
-	countQuery := "SELECT COUNT(*) FROM events" + where
-	if err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count events: %w", err)
+// List retrieves events ordered by event_time descending with pagination.
+func (r *EventRepo) List(ctx context.Context, params EventListParams) ([]domain.ParsedEvent, int64, error) {
+	if params.Limit <= 0 {
+		params.Limit = 50
+	}
+	if params.Limit > 200 {
+		params.Limit = 200
 	}
 
-	limit, offset := normalizePagination(filter.Page, filter.PerPage)
-	args = append(args, limit, offset)
+	// Count total rows for pagination metadata.
+	var total int64
+	countQuery := `SELECT COUNT(*) FROM events`
+	if err := r.pool.QueryRow(ctx, countQuery).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("eventRepo.List count: %w", err)
+	}
 
 	query := `
-		SELECT id, log_source_id::text, raw_line, message, hostname, process, pid,
-			log_level, event_time, received_at, extra
-		FROM events` + where + orderLimitOffset("ORDER BY event_time DESC, id DESC", len(args)-2)
+		SELECT id, log_source_id, raw_line, message, hostname, process, pid,
+		       log_level, event_time, received_at, extra
+		FROM events
+		ORDER BY event_time DESC
+		LIMIT $1 OFFSET $2`
 
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := r.pool.Query(ctx, query, params.Limit, params.Offset)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list events: %w", err)
+		return nil, 0, fmt.Errorf("eventRepo.List: %w", err)
 	}
 	defer rows.Close()
 
-	events, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Event, error) {
-		event, err := scanEvent(row)
-		if err != nil {
-			return domain.Event{}, err
+	var events []domain.ParsedEvent
+	for rows.Next() {
+		var ev domain.ParsedEvent
+		if err := rows.Scan(
+			&ev.ID,
+			&ev.LogSourceID,
+			&ev.RawLine,
+			&ev.Message,
+			&ev.Hostname,
+			&ev.Process,
+			&ev.PID,
+			&ev.LogLevel,
+			&ev.EventTime,
+			&ev.ReceivedAt,
+			&ev.Extra,
+		); err != nil {
+			return nil, 0, fmt.Errorf("eventRepo.List scan: %w", err)
 		}
-		return *event, nil
-	})
-	if err != nil {
-		return nil, 0, fmt.Errorf("scan events: %w", err)
+		events = append(events, ev)
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("eventRepo.List rows: %w", err)
+	}
 	return events, total, nil
-}
-
-func (r *EventRepo) Delete(ctx context.Context, id int64) error {
-	tag, err := r.db.Exec(ctx, `DELETE FROM events WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("delete event: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *EventRepo) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
-	tag, err := r.db.Exec(ctx, `DELETE FROM events WHERE received_at < $1`, cutoff)
-	if err != nil {
-		return 0, fmt.Errorf("delete old events: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}
-
-func buildEventWhere(filter EventFilter) ([]string, []any) {
-	var clauses []string
-	var args []any
-
-	if strings.TrimSpace(filter.SourceID) != "" {
-		args = append(args, strings.TrimSpace(filter.SourceID))
-		clauses = append(clauses, fmt.Sprintf("log_source_id = $%d::uuid", len(args)))
-	}
-	if strings.TrimSpace(filter.Level) != "" {
-		args = append(args, strings.TrimSpace(filter.Level))
-		clauses = append(clauses, fmt.Sprintf("log_level = $%d", len(args)))
-	}
-	if filter.From != nil {
-		args = append(args, *filter.From)
-		clauses = append(clauses, fmt.Sprintf("event_time >= $%d", len(args)))
-	}
-	if filter.To != nil {
-		args = append(args, *filter.To)
-		clauses = append(clauses, fmt.Sprintf("event_time <= $%d", len(args)))
-	}
-	if strings.TrimSpace(filter.Search) != "" {
-		args = append(args, "%"+strings.TrimSpace(filter.Search)+"%")
-		clauses = append(clauses, fmt.Sprintf("(message ILIKE $%d OR raw_line ILIKE $%d)", len(args), len(args)))
-	}
-
-	return clauses, args
-}
-
-type eventRow interface {
-	Scan(dest ...any) error
-}
-
-func scanEvent(row eventRow) (*domain.Event, error) {
-	var event domain.Event
-	var message pgtype.Text
-	var hostname pgtype.Text
-	var process pgtype.Text
-	var pid pgtype.Int4
-	var logLevel pgtype.Text
-	var rawExtra []byte
-
-	err := row.Scan(
-		&event.ID,
-		&event.LogSourceID,
-		&event.RawLine,
-		&message,
-		&hostname,
-		&process,
-		&pid,
-		&logLevel,
-		&event.EventTime,
-		&event.ReceivedAt,
-		&rawExtra,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	event.Message = textPtr(message)
-	event.Hostname = textPtr(hostname)
-	event.Process = textPtr(process)
-	event.PID = int32Ptr(pid)
-	event.LogLevel = textPtr(logLevel)
-
-	event.Extra, err = unmarshalJSONB(rawExtra)
-	if err != nil {
-		return nil, fmt.Errorf("unmarshal event extra: %w", err)
-	}
-
-	return &event, nil
 }

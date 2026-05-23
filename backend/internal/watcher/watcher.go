@@ -2,130 +2,217 @@ package watcher
 
 import (
 	"context"
-	"errors"
-	"log"
-	"os"
-	"strings"
+	"fmt"
+	"log/slog"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/google/uuid"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/parser"
 )
 
-type EventWriter interface {
-	Create(ctx context.Context, event *domain.Event) error
-}
+// ---------------------------------------------------------------------------
+// FileWatcher — watches a single file and emits ParsedEvents
+// ---------------------------------------------------------------------------
 
+// FileWatcher ties together an fsnotify watcher, an offset-aware reader,
+// and a log parser. One goroutine per watched file runs the select loop.
 type FileWatcher struct {
-	source       domain.LogSource
-	eventWriter  EventWriter
-	parser       parser.Parser
-	fallback     parser.Parser
-	pollInterval time.Duration
+	sourceID  uuid.UUID
+	filePath  string
+	logType   string
+	reader    *FileReader
+	parser    parser.Parser
+	eventChan chan<- *domain.ParsedEvent
+
+	cancel context.CancelFunc // stored so the registry can stop this watcher
 }
 
-func NewFileWatcher(source domain.LogSource, eventWriter EventWriter) *FileWatcher {
-	return &FileWatcher{
-		source:       source,
-		eventWriter:  eventWriter,
-		parser:       parser.NewParser(string(source.LogType)),
-		fallback:     parser.NewGenericParser(),
-		pollInterval: time.Second,
+// FileWatcherConfig holds the parameters needed to construct a FileWatcher.
+type FileWatcherConfig struct {
+	SourceID  uuid.UUID
+	FilePath  string
+	LogType   string
+	EventChan chan<- *domain.ParsedEvent
+	// SeekEnd controls whether existing file content is skipped.
+	// Set to true during initial startup so historical lines are not
+	// re-ingested; false when a watcher is added via the API for
+	// a brand-new file.
+	SeekEnd bool
+}
+
+// NewFileWatcher creates a FileWatcher ready to be started.
+func NewFileWatcher(cfg FileWatcherConfig) (*FileWatcher, error) {
+	reader, err := NewFileReader(cfg.FilePath, cfg.SeekEnd)
+	if err != nil {
+		return nil, fmt.Errorf("watcher: create reader for %s: %w", cfg.FilePath, err)
 	}
+
+	p := parser.New(cfg.LogType)
+
+	return &FileWatcher{
+		sourceID:  cfg.SourceID,
+		filePath:  cfg.FilePath,
+		logType:   cfg.LogType,
+		reader:    reader,
+		parser:    p,
+		eventChan: cfg.EventChan,
+	}, nil
 }
 
-func (w *FileWatcher) Run(ctx context.Context) {
-	reader := NewLineReader(resolveContainerPath(w.source.FilePath))
-	ticker := time.NewTicker(w.pollInterval)
-	defer ticker.Stop()
+// Start runs the fsnotify event loop in the current goroutine. It blocks
+// until ctx is cancelled. The caller is expected to launch this in a
+// separate goroutine.
+func (fw *FileWatcher) Start(ctx context.Context) error {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return fmt.Errorf("watcher: fsnotify.NewWatcher: %w", err)
+	}
+	defer watcher.Close()
+
+	if err := watcher.Add(fw.filePath); err != nil {
+		// File might not exist yet — log and continue; the re-watch
+		// loop below will retry.
+		slog.Warn("watcher: initial Add failed, will retry on rotation",
+			"path", fw.filePath,
+			"err", err,
+		)
+	}
+
+	slog.Info("watcher started",
+		"source_id", fw.sourceID,
+		"path", fw.filePath,
+		"parser", fw.parser.Name(),
+		"offset", fw.reader.Offset(),
+	)
+
+	// Debounce timer prevents bursts of WRITE events from triggering
+	// redundant read passes. When a WRITE arrives, we reset the timer;
+	// reading only happens when the timer fires (i.e. writes have
+	// settled for the debounce duration).
+	const debounceDuration = 50 * time.Millisecond
+	debounce := time.NewTimer(debounceDuration)
+	debounce.Stop() // don't fire until the first WRITE arrives
+	defer debounce.Stop()
 
 	for {
-		w.readAndPersist(ctx, reader)
-
 		select {
 		case <-ctx.Done():
-			return
-		case <-ticker.C:
+			slog.Info("watcher stopping (context cancelled)",
+				"source_id", fw.sourceID,
+				"path", fw.filePath,
+			)
+			return nil
+
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return nil // channel closed
+			}
+
+			switch {
+			case event.Has(fsnotify.Write):
+				// Debounce: reset the timer so we batch rapid writes.
+				debounce.Reset(debounceDuration)
+
+			case event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename):
+				// Log rotation: the old file was renamed or removed.
+				slog.Info("log rotation detected",
+					"source_id", fw.sourceID,
+					"path", fw.filePath,
+					"op", event.Op.String(),
+				)
+				fw.handleRotation(watcher)
+			}
+
+		case <-debounce.C:
+			// Debounce fired — read and process new lines.
+			fw.readAndParse()
+
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return nil
+			}
+			slog.Error("watcher: fsnotify error",
+				"source_id", fw.sourceID,
+				"path", fw.filePath,
+				"err", err,
+			)
 		}
 	}
 }
 
-func (w *FileWatcher) readAndPersist(ctx context.Context, reader *LineReader) {
-	lines, err := reader.ReadNewLines()
+// readAndParse reads new lines from the file and sends parsed events
+// to the event channel. Parse errors are logged and skipped — one bad
+// line never stops the pipeline.
+func (fw *FileWatcher) readAndParse() {
+	lines, err := fw.reader.ReadNewLines()
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			log.Printf("WARN: watcher read failed source=%s path=%s: %v", w.source.ID, w.source.FilePath, err)
-		}
+		slog.Error("watcher: read error",
+			"source_id", fw.sourceID,
+			"path", fw.filePath,
+			"err", err,
+		)
 		return
 	}
 
+	now := time.Now().UTC()
 	for _, line := range lines {
-		event, err := w.parseLine(line)
+		ev, err := fw.parser.Parse(line)
 		if err != nil {
+			slog.Debug("watcher: parse skip",
+				"source_id", fw.sourceID,
+				"parser", fw.parser.Name(),
+				"err", err,
+			)
 			continue
 		}
 
-		if err := w.eventWriter.Create(ctx, event); err != nil {
-			log.Printf("WARN: persist parsed event failed source=%s: %v", w.source.ID, err)
+		// Populate the fields the parser deliberately leaves blank.
+		ev.LogSourceID = fw.sourceID
+		ev.ReceivedAt = now
+
+		// Non-blocking send: if the channel is full, log a warning
+		// and drop the event rather than blocking the watcher goroutine.
+		select {
+		case fw.eventChan <- ev:
+		default:
+			slog.Warn("watcher: event channel full, dropping event",
+				"source_id", fw.sourceID,
+				"path", fw.filePath,
+			)
 		}
 	}
 }
 
-func (w *FileWatcher) parseLine(line string) (*domain.Event, error) {
-	parsed, err := w.parser.Parse(line)
-	if err != nil {
-		parsed, err = w.fallback.Parse(line)
-		if err != nil {
-			return nil, err
-		}
-	}
+// handleRotation is called when a RENAME or REMOVE event is detected.
+// It waits briefly for the new file to appear, resets the read offset,
+// and re-adds the path to fsnotify.
+func (fw *FileWatcher) handleRotation(watcher *fsnotify.Watcher) {
+	// Brief delay for the logging daemon to create the new file.
+	time.Sleep(200 * time.Millisecond)
 
-	event := &domain.Event{
-		LogSourceID: w.source.ID,
-		RawLine:     parsed.RawLine,
-		EventTime:   parsed.EventTime,
-		Extra:       parsed.Extra,
-	}
-	if event.Extra == nil {
-		event.Extra = map[string]any{}
-	}
-	event.Extra["log_type"] = string(w.source.LogType)
-	event.Extra["log_source_name"] = w.source.Name
+	fw.reader.ResetOffset()
 
-	if parsed.Message != "" {
-		event.Message = stringPtr(parsed.Message)
+	// Best-effort re-add — the file may not exist yet.
+	if err := watcher.Add(fw.filePath); err != nil {
+		slog.Warn("watcher: re-add after rotation failed, will retry next event",
+			"source_id", fw.sourceID,
+			"path", fw.filePath,
+			"err", err,
+		)
+	} else {
+		slog.Info("watcher: re-watching after rotation",
+			"source_id", fw.sourceID,
+			"path", fw.filePath,
+		)
 	}
-	if parsed.Hostname != "" {
-		event.Hostname = stringPtr(parsed.Hostname)
-	}
-	if parsed.Process != "" {
-		event.Process = stringPtr(parsed.Process)
-	}
-	if parsed.PID != nil {
-		event.PID = parsed.PID
-	}
-	if parsed.LogLevel != "" {
-		event.LogLevel = stringPtr(parsed.LogLevel)
-	}
-
-	return event, nil
 }
 
-func resolveContainerPath(path string) string {
-	if _, err := os.Stat(path); err == nil {
-		return path
+// Stop cancels the watcher's context, causing Start to return.
+func (fw *FileWatcher) Stop() {
+	if fw.cancel != nil {
+		fw.cancel()
 	}
-
-	if strings.HasPrefix(path, "/var/log/") {
-		hostPath := "/host" + path
-		if _, err := os.Stat(hostPath); err == nil {
-			return hostPath
-		}
-	}
-
-	return path
-}
-
-func stringPtr(value string) *string {
-	return &value
 }

@@ -3,80 +3,80 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
 )
 
+// ---------------------------------------------------------------------------
+// Repository interface (consumed by AlertService)
+// ---------------------------------------------------------------------------
+
+// AlertRepository defines the persistence contract that AlertService requires.
 type AlertRepository interface {
-	Create(ctx context.Context, alert *domain.Alert) error
-	GetByID(ctx context.Context, id string) (*domain.Alert, error)
-	List(ctx context.Context, filter repository.AlertFilter) ([]domain.Alert, int64, error)
-	Acknowledge(ctx context.Context, id string) (*domain.Alert, error)
-	MarkDiscordSent(ctx context.Context, id string) error
-	ListDiscordPending(ctx context.Context, limit int) ([]domain.Alert, error)
-	Delete(ctx context.Context, id string) error
+	Create(ctx context.Context, a *domain.Alert) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.Alert, error)
+	List(ctx context.Context, params repository.AlertListParams) ([]domain.Alert, int64, error)
+	Acknowledge(ctx context.Context, id uuid.UUID) (*domain.Alert, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+	MarkDiscordSent(ctx context.Context, id uuid.UUID) error
 }
 
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+// AlertService orchestrates Alert operations.
 type AlertService struct {
 	repo AlertRepository
 }
 
+// NewAlertService constructs an AlertService with the given repository.
 func NewAlertService(repo AlertRepository) *AlertService {
 	return &AlertService{repo: repo}
 }
 
-func (s *AlertService) Create(ctx context.Context, alert *domain.Alert) error {
-	if alert == nil {
-		return fmt.Errorf("%w: alert is required", ErrValidation)
+// Create persists a new alert. Called by the rule engine pipeline.
+func (s *AlertService) Create(ctx context.Context, a *domain.Alert) error {
+	if err := s.repo.Create(ctx, a); err != nil {
+		return fmt.Errorf("alertService.Create: %w", err)
 	}
-	alert.RuleName = strings.TrimSpace(alert.RuleName)
-	alert.Title = strings.TrimSpace(alert.Title)
-	if alert.RuleName == "" {
-		return fmt.Errorf("%w: rule_name is required", ErrValidation)
-	}
-	if alert.Title == "" {
-		return fmt.Errorf("%w: title is required", ErrValidation)
-	}
-	if alert.Severity == "" {
-		alert.Severity = domain.SeverityMedium
-	}
-	return s.repo.Create(ctx, alert)
+	return nil
 }
 
-func (s *AlertService) GetByID(ctx context.Context, id string) (*domain.Alert, error) {
-	if strings.TrimSpace(id) == "" {
-		return nil, fmt.Errorf("%w: id is required", ErrValidation)
+// GetByID retrieves a single alert.
+func (s *AlertService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Alert, error) {
+	a, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("alertService.GetByID: %w", err)
 	}
-	return s.repo.GetByID(ctx, strings.TrimSpace(id))
+	return a, nil
 }
 
-func (s *AlertService) List(ctx context.Context, filter repository.AlertFilter) ([]domain.Alert, int64, error) {
-	return s.repo.List(ctx, filter)
-}
-
-func (s *AlertService) Acknowledge(ctx context.Context, id string) (*domain.Alert, error) {
-	if strings.TrimSpace(id) == "" {
-		return nil, fmt.Errorf("%w: id is required", ErrValidation)
+// List returns paginated alerts.
+func (s *AlertService) List(ctx context.Context, params repository.AlertListParams) ([]domain.Alert, int64, error) {
+	alerts, total, err := s.repo.List(ctx, params)
+	if err != nil {
+		return nil, 0, fmt.Errorf("alertService.List: %w", err)
 	}
-	return s.repo.Acknowledge(ctx, strings.TrimSpace(id))
+	return alerts, total, nil
 }
 
-func (s *AlertService) Delete(ctx context.Context, id string) error {
-	if strings.TrimSpace(id) == "" {
-		return fmt.Errorf("%w: id is required", ErrValidation)
+// Acknowledge marks an alert as acknowledged.
+func (s *AlertService) Acknowledge(ctx context.Context, id uuid.UUID) (*domain.Alert, error) {
+	a, err := s.repo.Acknowledge(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("alertService.Acknowledge: %w", err)
 	}
-	return s.repo.Delete(ctx, strings.TrimSpace(id))
+	return a, nil
 }
 
-func (s *AlertService) MarkDiscordSent(ctx context.Context, id string) error {
-	if strings.TrimSpace(id) == "" {
-		return fmt.Errorf("%w: id is required", ErrValidation)
+// Delete removes an alert by ID.
+func (s *AlertService) Delete(ctx context.Context, id uuid.UUID) error {
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("alertService.Delete: %w", err)
 	}
-	return s.repo.MarkDiscordSent(ctx, strings.TrimSpace(id))
-}
-
-func (s *AlertService) ListDiscordPending(ctx context.Context, limit int) ([]domain.Alert, error) {
-	return s.repo.ListDiscordPending(ctx, limit)
+	return nil
 }

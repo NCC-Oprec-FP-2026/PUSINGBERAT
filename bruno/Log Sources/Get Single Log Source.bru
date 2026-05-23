@@ -1,0 +1,16 @@
+meta {
+  name: Get Single Log Source
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/v1/sources/{{source_id}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.id: eq {{source_id}}
+}

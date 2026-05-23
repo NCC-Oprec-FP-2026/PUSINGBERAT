@@ -2,224 +2,195 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 )
 
-type RuleFilter struct {
-	Enabled  *bool
-	Severity domain.Severity
-	Search   string
-	Page     int
-	PerPage  int
-}
-
+// RuleRepo provides CRUD operations for the rules table.
 type RuleRepo struct {
-	db *pgxpool.Pool
+	pool *pgxpool.Pool
 }
 
-func NewRuleRepo(db *pgxpool.Pool) *RuleRepo {
-	return &RuleRepo{db: db}
+// NewRuleRepo creates a new RuleRepo backed by the given connection pool.
+func NewRuleRepo(pool *pgxpool.Pool) *RuleRepo {
+	return &RuleRepo{pool: pool}
 }
 
+// Create inserts a new Rule into the database. Server-generated fields
+// (id, created_at, updated_at) are scanned back into the provided struct.
 func (r *RuleRepo) Create(ctx context.Context, rule *domain.Rule) error {
-	const query = `
+	query := `
 		INSERT INTO rules (name, description, yaml_content, severity, enabled)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id::text, created_at, updated_at
-	`
+		RETURNING id, created_at, updated_at`
 
-	severity := rule.Severity
-	if severity == "" {
-		severity = domain.SeverityMedium
-	}
-
-	err := r.db.QueryRow(
-		ctx,
-		query,
+	err := r.pool.QueryRow(ctx, query,
 		rule.Name,
 		rule.Description,
 		rule.YAMLContent,
-		string(severity),
+		rule.Severity,
 		rule.Enabled,
 	).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
+
 	if err != nil {
-		return fmt.Errorf("create rule: %w", err)
-	}
-
-	rule.Severity = severity
-	return nil
-}
-
-func (r *RuleRepo) GetByID(ctx context.Context, id string) (*domain.Rule, error) {
-	const query = `
-		SELECT id::text, name, description, yaml_content, severity, enabled, created_at, updated_at
-		FROM rules
-		WHERE id = $1::uuid
-	`
-
-	rule, err := scanRule(r.db.QueryRow(ctx, query, id))
-	if err != nil {
-		return nil, notFound(err)
-	}
-	return rule, nil
-}
-
-func (r *RuleRepo) GetByName(ctx context.Context, name string) (*domain.Rule, error) {
-	const query = `
-		SELECT id::text, name, description, yaml_content, severity, enabled, created_at, updated_at
-		FROM rules
-		WHERE name = $1
-	`
-
-	rule, err := scanRule(r.db.QueryRow(ctx, query, name))
-	if err != nil {
-		return nil, notFound(err)
-	}
-	return rule, nil
-}
-
-func (r *RuleRepo) List(ctx context.Context, filter RuleFilter) ([]domain.Rule, int64, error) {
-	clauses, args := buildRuleWhere(filter)
-	where := whereSQL(clauses)
-
-	var total int64
-	countQuery := "SELECT COUNT(*) FROM rules" + where
-	if err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count rules: %w", err)
-	}
-
-	limit, offset := normalizePagination(filter.Page, filter.PerPage)
-	args = append(args, limit, offset)
-
-	query := `
-		SELECT id::text, name, description, yaml_content, severity, enabled, created_at, updated_at
-		FROM rules` + where + orderLimitOffset("ORDER BY updated_at DESC", len(args)-2)
-
-	rows, err := r.db.Query(ctx, query, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("list rules: %w", err)
-	}
-	defer rows.Close()
-
-	rules, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Rule, error) {
-		rule, err := scanRule(row)
-		if err != nil {
-			return domain.Rule{}, err
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("ruleRepo.Create: %w", domain.ErrConflict)
 		}
-		return *rule, nil
-	})
-	if err != nil {
-		return nil, 0, fmt.Errorf("scan rules: %w", err)
-	}
-
-	return rules, total, nil
-}
-
-func (r *RuleRepo) Update(ctx context.Context, rule *domain.Rule) error {
-	const query = `
-		UPDATE rules
-		SET name = $2,
-			description = $3,
-			yaml_content = $4,
-			severity = $5,
-			enabled = $6
-		WHERE id = $1::uuid
-		RETURNING updated_at
-	`
-
-	err := r.db.QueryRow(
-		ctx,
-		query,
-		rule.ID,
-		rule.Name,
-		rule.Description,
-		rule.YAMLContent,
-		string(rule.Severity),
-		rule.Enabled,
-	).Scan(&rule.UpdatedAt)
-	if err != nil {
-		return notFound(fmt.Errorf("update rule: %w", err))
+		return fmt.Errorf("ruleRepo.Create: %w", err)
 	}
 	return nil
 }
 
-func (r *RuleRepo) SetEnabled(ctx context.Context, id string, enabled bool) error {
-	tag, err := r.db.Exec(ctx, `
-		UPDATE rules
-		SET enabled = $2
-		WHERE id = $1::uuid
-	`, id, enabled)
-	if err != nil {
-		return fmt.Errorf("set rule enabled: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
+// GetByID retrieves a single Rule by its UUID primary key.
+func (r *RuleRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Rule, error) {
+	query := `
+		SELECT id, name, description, yaml_content, severity, enabled, created_at, updated_at
+		FROM rules
+		WHERE id = $1`
 
-func (r *RuleRepo) Delete(ctx context.Context, id string) error {
-	tag, err := r.db.Exec(ctx, `DELETE FROM rules WHERE id = $1::uuid`, id)
-	if err != nil {
-		return fmt.Errorf("delete rule: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func buildRuleWhere(filter RuleFilter) ([]string, []any) {
-	var clauses []string
-	var args []any
-
-	if filter.Enabled != nil {
-		args = append(args, *filter.Enabled)
-		clauses = append(clauses, fmt.Sprintf("enabled = $%d", len(args)))
-	}
-	if filter.Severity != "" {
-		args = append(args, string(filter.Severity))
-		clauses = append(clauses, fmt.Sprintf("severity = $%d", len(args)))
-	}
-	if strings.TrimSpace(filter.Search) != "" {
-		args = append(args, "%"+strings.TrimSpace(filter.Search)+"%")
-		clauses = append(clauses, fmt.Sprintf("(name ILIKE $%d OR description ILIKE $%d)", len(args), len(args)))
-	}
-
-	return clauses, args
-}
-
-type ruleRow interface {
-	Scan(dest ...any) error
-}
-
-func scanRule(row ruleRow) (*domain.Rule, error) {
-	var rule domain.Rule
-	var description pgtype.Text
-	var severity string
-
-	err := row.Scan(
+	rule := &domain.Rule{}
+	err := r.pool.QueryRow(ctx, query, id).Scan(
 		&rule.ID,
 		&rule.Name,
-		&description,
+		&rule.Description,
 		&rule.YAMLContent,
-		&severity,
+		&rule.Severity,
 		&rule.Enabled,
 		&rule.CreatedAt,
 		&rule.UpdatedAt,
 	)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, fmt.Errorf("ruleRepo.GetByID: %w", err)
 	}
+	return rule, nil
+}
 
-	rule.Description = textPtr(description)
-	rule.Severity = domain.Severity(severity)
-	return &rule, nil
+// List returns all rules ordered by creation time (newest first).
+func (r *RuleRepo) List(ctx context.Context) ([]domain.Rule, error) {
+	query := `
+		SELECT id, name, description, yaml_content, severity, enabled, created_at, updated_at
+		FROM rules
+		ORDER BY created_at DESC`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("ruleRepo.List: %w", err)
+	}
+	defer rows.Close()
+
+	var rules []domain.Rule
+	for rows.Next() {
+		var rule domain.Rule
+		if err := rows.Scan(
+			&rule.ID,
+			&rule.Name,
+			&rule.Description,
+			&rule.YAMLContent,
+			&rule.Severity,
+			&rule.Enabled,
+			&rule.CreatedAt,
+			&rule.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("ruleRepo.List scan: %w", err)
+		}
+		rules = append(rules, rule)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ruleRepo.List rows: %w", err)
+	}
+	return rules, nil
+}
+
+// Update replaces the mutable fields of an existing Rule. The updated_at
+// column is refreshed automatically by the database trigger.
+func (r *RuleRepo) Update(ctx context.Context, rule *domain.Rule) error {
+	query := `
+		UPDATE rules
+		SET name = $2, description = $3, yaml_content = $4, severity = $5, enabled = $6
+		WHERE id = $1
+		RETURNING updated_at`
+
+	err := r.pool.QueryRow(ctx, query,
+		rule.ID,
+		rule.Name,
+		rule.Description,
+		rule.YAMLContent,
+		rule.Severity,
+		rule.Enabled,
+	).Scan(&rule.UpdatedAt)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("ruleRepo.Update: %w", domain.ErrConflict)
+		}
+		return fmt.Errorf("ruleRepo.Update: %w", err)
+	}
+	return nil
+}
+
+// Delete removes a Rule by ID. Associated alerts keep their rule_name due
+// to the ON DELETE SET NULL foreign key (rule_id becomes NULL).
+func (r *RuleRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	query := `DELETE FROM rules WHERE id = $1`
+
+	ct, err := r.pool.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("ruleRepo.Delete: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// ListEnabled returns only enabled rules (used by the rule engine at load time).
+func (r *RuleRepo) ListEnabled(ctx context.Context) ([]domain.Rule, error) {
+	query := `
+		SELECT id, name, description, yaml_content, severity, enabled, created_at, updated_at
+		FROM rules
+		WHERE enabled = true
+		ORDER BY created_at DESC`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("ruleRepo.ListEnabled: %w", err)
+	}
+	defer rows.Close()
+
+	var rules []domain.Rule
+	for rows.Next() {
+		var rule domain.Rule
+		if err := rows.Scan(
+			&rule.ID,
+			&rule.Name,
+			&rule.Description,
+			&rule.YAMLContent,
+			&rule.Severity,
+			&rule.Enabled,
+			&rule.CreatedAt,
+			&rule.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("ruleRepo.ListEnabled scan: %w", err)
+		}
+		rules = append(rules, rule)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("ruleRepo.ListEnabled rows: %w", err)
+	}
+	return rules, nil
 }

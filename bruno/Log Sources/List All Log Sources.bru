@@ -1,0 +1,16 @@
+meta {
+  name: List All Log Sources
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/v1/sources
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isDefined
+}

@@ -1,233 +1,167 @@
+// Package repository implements the data-access layer for the PUSINGBERAT
+// SIEM backend. Every function in this package executes raw SQL via the pgx
+// driver and returns domain structs. No business logic belongs here.
+//
+// All queries use parameterized placeholders ($1, $2, …) to prevent SQL
+// injection. Functions accept context.Context as their first argument to
+// support request-scoped timeouts and cancellation.
 package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 )
 
-type LogSourceFilter struct {
-	Status  domain.LogSourceStatus
-	LogType domain.LogSourceType
-	Search  string
-	Page    int
-	PerPage int
-}
-
+// LogSourceRepo provides CRUD operations for the log_sources table.
 type LogSourceRepo struct {
-	db *pgxpool.Pool
+	pool *pgxpool.Pool
 }
 
-func NewLogSourceRepo(db *pgxpool.Pool) *LogSourceRepo {
-	return &LogSourceRepo{db: db}
+// NewLogSourceRepo creates a new LogSourceRepo backed by the given connection pool.
+func NewLogSourceRepo(pool *pgxpool.Pool) *LogSourceRepo {
+	return &LogSourceRepo{pool: pool}
 }
 
-func (r *LogSourceRepo) Create(ctx context.Context, source *domain.LogSource) error {
-	const query = `
+// Create inserts a new LogSource into the database. The ID, CreatedAt, and
+// UpdatedAt fields are populated by PostgreSQL defaults and scanned back
+// into the provided struct.
+func (r *LogSourceRepo) Create(ctx context.Context, ls *domain.LogSource) error {
+	query := `
 		INSERT INTO log_sources (name, file_path, log_type, status, description)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id::text, created_at, updated_at
-	`
+		RETURNING id, created_at, updated_at`
 
-	logType := source.LogType
-	if logType == "" {
-		logType = domain.LogSourceTypeGeneric
-	}
+	err := r.pool.QueryRow(ctx, query,
+		ls.Name,
+		ls.FilePath,
+		ls.LogType,
+		ls.Status,
+		ls.Description,
+	).Scan(&ls.ID, &ls.CreatedAt, &ls.UpdatedAt)
 
-	status := source.Status
-	if status == "" {
-		status = domain.LogSourceStatusActive
-	}
-
-	err := r.db.QueryRow(
-		ctx,
-		query,
-		source.Name,
-		source.FilePath,
-		string(logType),
-		string(status),
-		source.Description,
-	).Scan(&source.ID, &source.CreatedAt, &source.UpdatedAt)
 	if err != nil {
-		return fmt.Errorf("create log source: %w", err)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("logSourceRepo.Create: %w", domain.ErrConflict)
+		}
+		return fmt.Errorf("logSourceRepo.Create: %w", err)
 	}
-
-	source.LogType = logType
-	source.Status = status
 	return nil
 }
 
-func (r *LogSourceRepo) GetByID(ctx context.Context, id string) (*domain.LogSource, error) {
-	const query = `
-		SELECT id::text, name, file_path, log_type, status, description, created_at, updated_at
-		FROM log_sources
-		WHERE id = $1::uuid
-	`
-
-	source, err := scanLogSource(r.db.QueryRow(ctx, query, id))
-	if err != nil {
-		return nil, notFound(err)
-	}
-	return source, nil
-}
-
-func (r *LogSourceRepo) GetByFilePath(ctx context.Context, filePath string) (*domain.LogSource, error) {
-	const query = `
-		SELECT id::text, name, file_path, log_type, status, description, created_at, updated_at
-		FROM log_sources
-		WHERE file_path = $1
-	`
-
-	source, err := scanLogSource(r.db.QueryRow(ctx, query, filePath))
-	if err != nil {
-		return nil, notFound(err)
-	}
-	return source, nil
-}
-
-func (r *LogSourceRepo) List(ctx context.Context, filter LogSourceFilter) ([]domain.LogSource, int64, error) {
-	clauses, args := buildLogSourceWhere(filter)
-	where := whereSQL(clauses)
-
-	var total int64
-	countQuery := "SELECT COUNT(*) FROM log_sources" + where
-	if err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count log sources: %w", err)
-	}
-
-	limit, offset := normalizePagination(filter.Page, filter.PerPage)
-	args = append(args, limit, offset)
-
+// GetByID retrieves a single LogSource by its UUID primary key.
+func (r *LogSourceRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.LogSource, error) {
 	query := `
-		SELECT id::text, name, file_path, log_type, status, description, created_at, updated_at
-		FROM log_sources` + where + orderLimitOffset("ORDER BY created_at DESC", len(args)-2)
+		SELECT id, name, file_path, log_type, status, description, created_at, updated_at
+		FROM log_sources
+		WHERE id = $1`
 
-	rows, err := r.db.Query(ctx, query, args...)
+	ls := &domain.LogSource{}
+	err := r.pool.QueryRow(ctx, query, id).Scan(
+		&ls.ID,
+		&ls.Name,
+		&ls.FilePath,
+		&ls.LogType,
+		&ls.Status,
+		&ls.Description,
+		&ls.CreatedAt,
+		&ls.UpdatedAt,
+	)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list log sources: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, fmt.Errorf("logSourceRepo.GetByID: %w", err)
+	}
+	return ls, nil
+}
+
+// List returns all log sources ordered by creation time (newest first).
+func (r *LogSourceRepo) List(ctx context.Context) ([]domain.LogSource, error) {
+	query := `
+		SELECT id, name, file_path, log_type, status, description, created_at, updated_at
+		FROM log_sources
+		ORDER BY created_at DESC`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("logSourceRepo.List: %w", err)
 	}
 	defer rows.Close()
 
-	sources, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.LogSource, error) {
-		source, err := scanLogSource(row)
-		if err != nil {
-			return domain.LogSource{}, err
+	var sources []domain.LogSource
+	for rows.Next() {
+		var ls domain.LogSource
+		if err := rows.Scan(
+			&ls.ID,
+			&ls.Name,
+			&ls.FilePath,
+			&ls.LogType,
+			&ls.Status,
+			&ls.Description,
+			&ls.CreatedAt,
+			&ls.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("logSourceRepo.List scan: %w", err)
 		}
-		return *source, nil
-	})
-	if err != nil {
-		return nil, 0, fmt.Errorf("scan log sources: %w", err)
+		sources = append(sources, ls)
 	}
-
-	return sources, total, nil
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("logSourceRepo.List rows: %w", err)
+	}
+	return sources, nil
 }
 
-func (r *LogSourceRepo) Update(ctx context.Context, source *domain.LogSource) error {
-	const query = `
+// Update modifies the mutable fields of an existing LogSource. The updated_at
+// column is refreshed automatically by the database trigger.
+func (r *LogSourceRepo) Update(ctx context.Context, ls *domain.LogSource) error {
+	query := `
 		UPDATE log_sources
-		SET name = $2,
-			file_path = $3,
-			log_type = $4,
-			status = $5,
-			description = $6
-		WHERE id = $1::uuid
-		RETURNING updated_at
-	`
+		SET name = $2, file_path = $3, log_type = $4, status = $5, description = $6
+		WHERE id = $1
+		RETURNING updated_at`
 
-	err := r.db.QueryRow(
-		ctx,
-		query,
-		source.ID,
-		source.Name,
-		source.FilePath,
-		string(source.LogType),
-		string(source.Status),
-		source.Description,
-	).Scan(&source.UpdatedAt)
+	err := r.pool.QueryRow(ctx, query,
+		ls.ID,
+		ls.Name,
+		ls.FilePath,
+		ls.LogType,
+		ls.Status,
+		ls.Description,
+	).Scan(&ls.UpdatedAt)
+
 	if err != nil {
-		return notFound(fmt.Errorf("update log source: %w", err))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("logSourceRepo.Update: %w", domain.ErrConflict)
+		}
+		return fmt.Errorf("logSourceRepo.Update: %w", err)
 	}
 	return nil
 }
 
-func (r *LogSourceRepo) UpdateStatus(ctx context.Context, id string, status domain.LogSourceStatus) error {
-	tag, err := r.db.Exec(ctx, `
-		UPDATE log_sources
-		SET status = $2
-		WHERE id = $1::uuid
-	`, id, string(status))
+// Delete removes a LogSource by ID. Associated events are cascade-deleted
+// by the ON DELETE CASCADE foreign key constraint in PostgreSQL.
+func (r *LogSourceRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	query := `DELETE FROM log_sources WHERE id = $1`
+
+	ct, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
-		return fmt.Errorf("update log source status: %w", err)
+		return fmt.Errorf("logSourceRepo.Delete: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+	if ct.RowsAffected() == 0 {
+		return domain.ErrNotFound
 	}
 	return nil
-}
-
-func (r *LogSourceRepo) Delete(ctx context.Context, id string) error {
-	tag, err := r.db.Exec(ctx, `DELETE FROM log_sources WHERE id = $1::uuid`, id)
-	if err != nil {
-		return fmt.Errorf("delete log source: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func buildLogSourceWhere(filter LogSourceFilter) ([]string, []any) {
-	var clauses []string
-	var args []any
-
-	if filter.Status != "" {
-		args = append(args, string(filter.Status))
-		clauses = append(clauses, fmt.Sprintf("status = $%d", len(args)))
-	}
-	if filter.LogType != "" {
-		args = append(args, string(filter.LogType))
-		clauses = append(clauses, fmt.Sprintf("log_type = $%d", len(args)))
-	}
-	if strings.TrimSpace(filter.Search) != "" {
-		args = append(args, "%"+strings.TrimSpace(filter.Search)+"%")
-		clauses = append(clauses, fmt.Sprintf("(name ILIKE $%d OR file_path ILIKE $%d)", len(args), len(args)))
-	}
-
-	return clauses, args
-}
-
-type logSourceRow interface {
-	Scan(dest ...any) error
-}
-
-func scanLogSource(row logSourceRow) (*domain.LogSource, error) {
-	var source domain.LogSource
-	var logType string
-	var status string
-	var description pgtype.Text
-
-	err := row.Scan(
-		&source.ID,
-		&source.Name,
-		&source.FilePath,
-		&logType,
-		&status,
-		&description,
-		&source.CreatedAt,
-		&source.UpdatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	source.LogType = domain.LogSourceType(logType)
-	source.Status = domain.LogSourceStatus(status)
-	source.Description = textPtr(description)
-	return &source, nil
 }

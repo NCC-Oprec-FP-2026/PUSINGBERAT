@@ -1,0 +1,16 @@
+meta {
+  name: Toggle Rule
+  type: http
+  seq: 5
+}
+
+patch {
+  url: {{base_url}}/api/v1/rules/{{rule_id}}/toggle
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.enabled: isDefined
+}

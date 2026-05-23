@@ -3,99 +3,118 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
+	"log/slog"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
 )
 
+// ---------------------------------------------------------------------------
+// Repository interface (consumed by EventService)
+// ---------------------------------------------------------------------------
+
+// EventRepository defines the persistence contract that EventService requires.
 type EventRepository interface {
-	Create(ctx context.Context, event *domain.Event) error
-	GetByID(ctx context.Context, id int64) (*domain.Event, error)
-	List(ctx context.Context, filter repository.EventFilter) ([]domain.Event, int64, error)
-	Delete(ctx context.Context, id int64) error
-	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+	Create(ctx context.Context, ev *domain.ParsedEvent) error
+	GetByID(ctx context.Context, id int64) (*domain.ParsedEvent, error)
+	List(ctx context.Context, params repository.EventListParams) ([]domain.ParsedEvent, int64, error)
 }
 
-type EventEvaluator interface {
-	Evaluate(ctx context.Context, event *domain.Event) ([]domain.Alert, error)
-}
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
 
+// EventService orchestrates ParsedEvent operations and hosts the background
+// persistence goroutine that drains the watcher pipeline's event channel.
 type EventService struct {
-	repo      EventRepository
-	evaluator EventEvaluator
-	alerts    chan<- domain.Alert
+	repo EventRepository
 }
 
-func NewEventService(repo EventRepository, evaluator EventEvaluator, alerts chan<- domain.Alert) *EventService {
-	return &EventService{
-		repo:      repo,
-		evaluator: evaluator,
-		alerts:    alerts,
-	}
+// NewEventService constructs an EventService with the given repository.
+func NewEventService(repo EventRepository) *EventService {
+	return &EventService{repo: repo}
 }
 
-func (s *EventService) Create(ctx context.Context, event *domain.Event) error {
-	if event == nil {
-		return fmt.Errorf("%w: event is required", ErrValidation)
+// Create persists a new parsed event. Called internally by the log watcher
+// pipeline — not directly by an HTTP handler.
+func (s *EventService) Create(ctx context.Context, ev *domain.ParsedEvent) error {
+	if err := s.repo.Create(ctx, ev); err != nil {
+		return fmt.Errorf("eventService.Create: %w", err)
 	}
-	event.RawLine = strings.TrimSpace(event.RawLine)
-	event.LogSourceID = strings.TrimSpace(event.LogSourceID)
-	if event.RawLine == "" {
-		return fmt.Errorf("%w: raw_line is required", ErrValidation)
-	}
-	if event.LogSourceID == "" {
-		return fmt.Errorf("%w: log_source_id is required", ErrValidation)
-	}
-	if event.EventTime.IsZero() {
-		event.EventTime = time.Now().UTC()
-	}
-	if err := s.repo.Create(ctx, event); err != nil {
-		return err
-	}
-
-	if s.evaluator != nil && s.alerts != nil {
-		alerts, err := s.evaluator.Evaluate(ctx, event)
-		if err != nil {
-			return err
-		}
-		for _, alert := range alerts {
-			select {
-			case s.alerts <- alert:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-
 	return nil
 }
 
-func (s *EventService) GetByID(ctx context.Context, id int64) (*domain.Event, error) {
-	if id < 1 {
-		return nil, fmt.Errorf("%w: id must be positive", ErrValidation)
+// GetByID retrieves a single event by its BIGSERIAL ID.
+func (s *EventService) GetByID(ctx context.Context, id int64) (*domain.ParsedEvent, error) {
+	ev, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("eventService.GetByID: %w", err)
 	}
-	return s.repo.GetByID(ctx, id)
+	return ev, nil
 }
 
-func (s *EventService) List(ctx context.Context, filter repository.EventFilter) ([]domain.Event, int64, error) {
-	filter.SourceID = strings.TrimSpace(filter.SourceID)
-	filter.Level = strings.TrimSpace(filter.Level)
-	filter.Search = strings.TrimSpace(filter.Search)
-	return s.repo.List(ctx, filter)
+// List returns paginated events.
+func (s *EventService) List(ctx context.Context, params repository.EventListParams) ([]domain.ParsedEvent, int64, error) {
+	events, total, err := s.repo.List(ctx, params)
+	if err != nil {
+		return nil, 0, fmt.Errorf("eventService.List: %w", err)
+	}
+	return events, total, nil
 }
 
-func (s *EventService) Delete(ctx context.Context, id int64) error {
-	if id < 1 {
-		return fmt.Errorf("%w: id must be positive", ErrValidation)
-	}
-	return s.repo.Delete(ctx, id)
-}
+// ---------------------------------------------------------------------------
+// Background persistence goroutine
+// ---------------------------------------------------------------------------
 
-func (s *EventService) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
-	if cutoff.IsZero() {
-		return 0, fmt.Errorf("%w: cutoff is required", ErrValidation)
-	}
-	return s.repo.DeleteOlderThan(ctx, cutoff)
+// StartPersistenceWorker launches a background goroutine that reads parsed
+// events from the provided channel and persists them to the database via
+// EventRepository.Create.
+//
+// The goroutine runs until ctx is cancelled or eventChan is closed. Parse
+// or DB errors are logged but never crash the worker — one bad event must
+// not stop the pipeline.
+//
+// This is called once from main.go after DI wiring is complete.
+func (s *EventService) StartPersistenceWorker(ctx context.Context, eventChan <-chan *domain.ParsedEvent) {
+	go func() {
+		slog.Info("event persistence worker started")
+		var saved, dropped int64
+
+		for {
+			select {
+			case <-ctx.Done():
+				slog.Info("event persistence worker stopping",
+					"saved", saved,
+					"dropped", dropped,
+				)
+				return
+
+			case ev, ok := <-eventChan:
+				if !ok {
+					slog.Info("event persistence worker: channel closed",
+						"saved", saved,
+						"dropped", dropped,
+					)
+					return
+				}
+
+				if err := s.repo.Create(ctx, ev); err != nil {
+					dropped++
+					slog.Error("event persistence worker: save failed",
+						"source_id", ev.LogSourceID,
+						"err", err,
+					)
+					continue
+				}
+				saved++
+
+				if saved%100 == 0 {
+					slog.Debug("event persistence worker progress",
+						"saved", saved,
+						"dropped", dropped,
+					)
+				}
+			}
+		}
+	}()
 }

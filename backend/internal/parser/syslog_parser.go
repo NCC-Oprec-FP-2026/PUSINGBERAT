@@ -6,72 +6,102 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 )
 
-var syslogRegex = regexp.MustCompile(`^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+([A-Za-z0-9_./-]+)(?:\[(\d+)\])?:\s*(.*)$`)
+// ---------------------------------------------------------------------------
+// Regex — compiled once at package init, never inside the parse loop.
+// ---------------------------------------------------------------------------
 
-type SyslogParser struct {
-	now func() time.Time
-}
+// syslogRe matches the BSD/RFC 3164 syslog format commonly produced by
+// rsyslog and systemd-journald:
+//
+//	May 21 14:30:00 myhost sshd[1234]: Failed password for root
+//	May  5 09:01:02 myhost CRON[456]: (root) CMD (/usr/lib/…)
+//
+// Named groups:
+//
+//	month  — abbreviated month name  (May)
+//	day    — day of month, 1 or 2 digits (5, 21)
+//	time   — HH:MM:SS
+//	host   — hostname (non-whitespace)
+//	proc   — process/tag (captured up to the optional [PID])
+//	pid    — numeric PID inside brackets (optional)
+//	msg    — the rest of the line after ": "
+var syslogRe = regexp.MustCompile(
+	`^(?P<month>[A-Z][a-z]{2})\s+(?P<day>\d{1,2})\s+(?P<time>\d{2}:\d{2}:\d{2})\s+` +
+		`(?P<host>\S+)\s+` +
+		`(?P<proc>[^\s\[:]+)` + // process name (up to [ or : or whitespace)
+		`(?:\[(?P<pid>\d+)\])?` + // optional [PID]
+		`:\s+(?P<msg>.+)$`,
+)
 
-func NewSyslogParser() *SyslogParser {
-	return &SyslogParser{now: time.Now}
-}
+// Pre-compute subexpression indexes once so they are not resolved per call.
+var (
+	syslogIdxMonth = syslogRe.SubexpIndex("month")
+	syslogIdxDay   = syslogRe.SubexpIndex("day")
+	syslogIdxTime  = syslogRe.SubexpIndex("time")
+	syslogIdxHost  = syslogRe.SubexpIndex("host")
+	syslogIdxProc  = syslogRe.SubexpIndex("proc")
+	syslogIdxPID   = syslogRe.SubexpIndex("pid")
+	syslogIdxMsg   = syslogRe.SubexpIndex("msg")
+)
 
-func (p *SyslogParser) Parse(line string) (*ParsedEvent, error) {
-	raw := strings.TrimRight(line, "\r\n")
-	if strings.TrimSpace(raw) == "" {
-		return nil, ErrMalformedLine
+// ---------------------------------------------------------------------------
+// SyslogParser
+// ---------------------------------------------------------------------------
+
+// SyslogParser parses BSD/RFC 3164 syslog lines. It is stateless and safe
+// for concurrent use.
+type SyslogParser struct{}
+
+// Name implements Parser.
+func (p *SyslogParser) Name() string { return "syslog" }
+
+// Parse implements Parser. It extracts timestamp, hostname, process, PID, and
+// message from a BSD syslog line and maps them into a domain.ParsedEvent.
+func (p *SyslogParser) Parse(line string) (*domain.ParsedEvent, error) {
+	line = strings.TrimSpace(line)
+	if len(line) == 0 {
+		return nil, fmt.Errorf("syslog: empty line")
 	}
 
-	matches := syslogRegex.FindStringSubmatch(raw)
+	matches := syslogRe.FindStringSubmatch(line)
 	if matches == nil {
-		return nil, ErrMalformedLine
+		return nil, fmt.Errorf("syslog: line did not match expected format: %.80s", line)
 	}
 
-	eventTime, err := parseSyslogTimestamp(matches[1], p.now())
+	// --- Build the event time ------------------------------------------------
+	// BSD syslog timestamps lack a year; we use the current year.
+	// Format: "Jan  2 15:04:05"  (Go reference time: Jan 2 15:04:05 2006)
+	tsRaw := fmt.Sprintf("%s %s %s", matches[syslogIdxMonth], matches[syslogIdxDay], matches[syslogIdxTime])
+	eventTime, err := time.Parse("Jan 2 15:04:05", tsRaw)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrMalformedLine, err)
+		return nil, fmt.Errorf("syslog: bad timestamp %q: %w", tsRaw, err)
 	}
+	eventTime = eventTime.AddDate(time.Now().Year(), 0, 0).UTC()
 
-	var pid *int32
-	if matches[4] != "" {
-		parsedPID, err := strconv.ParseInt(matches[4], 10, 32)
-		if err != nil {
-			return nil, fmt.Errorf("%w: invalid pid", ErrMalformedLine)
-		}
-		value := int32(parsedPID)
-		pid = &value
-	}
+	// --- Populate the ParsedEvent --------------------------------------------
+	host := matches[syslogIdxHost]
+	proc := matches[syslogIdxProc]
+	msg := matches[syslogIdxMsg]
 
-	message := strings.TrimSpace(matches[5])
-	return &ParsedEvent{
-		RawLine:   raw,
-		Message:   message,
-		Hostname:  matches[2],
-		Process:   matches[3],
-		PID:       pid,
+	ev := &domain.ParsedEvent{
+		RawLine:   line,
+		Hostname:  &host,
+		Process:   &proc,
+		Message:   &msg,
 		EventTime: eventTime,
-		Extra: map[string]any{
-			"parser": "syslog",
-		},
-	}, nil
-}
-
-func parseSyslogTimestamp(raw string, now time.Time) (time.Time, error) {
-	value, err := time.ParseInLocation("Jan 2 15:04:05", raw, now.Location())
-	if err != nil {
-		return time.Time{}, err
 	}
 
-	return time.Date(
-		now.Year(),
-		value.Month(),
-		value.Day(),
-		value.Hour(),
-		value.Minute(),
-		value.Second(),
-		0,
-		now.Location(),
-	), nil
+	// PID is optional — only set when present.
+	if pidStr := matches[syslogIdxPID]; pidStr != "" {
+		pid, err := strconv.Atoi(pidStr)
+		if err == nil {
+			ev.PID = &pid
+		}
+	}
+
+	return ev, nil
 }
