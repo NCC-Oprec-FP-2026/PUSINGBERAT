@@ -181,8 +181,11 @@ pipeline {
         }
 
         // ── Stage 6: Docker Build ─────────────────────────────
-        // Build production image via docker-compose.prod.yml.
-        // docker-compose.prod.yml → backend/Dockerfile (multi-stage).
+        // Memanggil docker build langsung ke backend/Dockerfile.
+        // TIDAK melalui docker compose karena compose akan mem-parse
+        // seluruh docker-compose.prod.yml dan memvalidasi env var
+        // postgres (POSTGRES_PASSWORD) yang tidak ada di Jenkins.
+        // docker-compose.prod.yml tetap dipakai untuk deployment manual.
         stage('Docker Build') {
             when {
                 expression {
@@ -192,15 +195,12 @@ pipeline {
             }
             steps {
                 sh """
-                    echo "→ Building production image via Docker Compose..."
-                    docker compose \
-                        -f infra/docker-compose.prod.yml \
-                        build \
-                        --no-cache \
-                        backend
-
-                    echo "→ Tagging image as ${IMAGE_NAME}:${IMAGE_TAG}..."
-                    docker tag pusingberat-backend:latest ${IMAGE_NAME}:${IMAGE_TAG}
+                    echo "→ Building production image: ${IMAGE_NAME}:${IMAGE_TAG}..."
+                    docker build \
+                        -t ${IMAGE_NAME}:${IMAGE_TAG} \
+                        -t ${IMAGE_NAME}:latest \
+                        -f backend/Dockerfile \
+                        backend/
 
                     echo "✅ Docker image built: ${IMAGE_NAME}:${IMAGE_TAG}"
                 """
