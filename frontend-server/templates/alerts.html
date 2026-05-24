@@ -24,87 +24,102 @@
     <link rel="stylesheet" href="/statics/css/alerts/style.css">
 </head>
 <body class="font-[outfit]">
-    <div id="app">
+    <div id="app" class="min-h-screen lg:h-screen lg:max-h-screen bg-[#030712] text-slate-100 font-['Outfit',sans-serif] antialiased selection:bg-indigo-500/30 selection:text-indigo-200 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900/40 via-[#030712] to-[#030712] overflow-x-hidden lg:overflow-hidden">
 
-        <!-- The Dialog Overlay -->
         <p-dialog 
             v-model:visible="open_select_alert_overlay" 
             maximizable 
             modal 
             :header="'Alert Details: ' + selected_alert?.rule_name" 
-            :style="{ width: '50rem' }" 
-            :breakpoints="{ '1199px': '75vw', '575px': '90vw' }"
+            :style="{ width: '100%', maxWidth: '550px' }" 
+            :breakpoints="{ '1199px': '75vw', '575px': '95vw' }"
+            class="mx-4 backdrop-blur-md"
         >
-            <!-- Check if an alert is currently selected to avoid null template errors -->
-            <div v-if="selected_alert" class="flex flex-col gap-4">
+            <div v-if="selected_alert" class="flex flex-col gap-5 pt-4">
                 
-                <!-- Severity Card Indicator -->
-                <div class="flex justify-between items-center bg-slate-50 p-4 rounded-lg border border-slate-200">
-                    <div>
-                        <span class="text-xs text-slate-500 block uppercase font-bold tracking-wider">Incident Title</span>
-                        <span class="text-lg font-semibold text-slate-800">{{ selected_alert.title }}</span>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 backdrop-blur-sm gap-4 shadow-sm">
+                    <div class="space-y-0.5">
+                        <span class="text-[10px] text-indigo-400 block uppercase font-bold tracking-widest">Incident Title</span>
+                        <span class="text-base font-bold text-slate-100 tracking-tight">{{ selected_alert.title }}</span>
                     </div>
-                    <p-message :severity="alert_severity_map[selected_alert.severity.toUpperCase()]" icon="">
+                    <p-message :severity="alert_severity_map[selected_alert.severity.toUpperCase()]" icon="" class="w-full sm:w-auto text-center font-bold tracking-wide uppercase px-3 shadow-inner">
                         {{ selected_alert.severity.toUpperCase() }}
                     </p-message>
                 </div>
 
-                <!-- Description Meta Block -->
-                <div>
-                    <span class="text-xs text-slate-500 block uppercase font-bold tracking-wider mb-1">Description</span>
-                    <p class="m-0 text-slate-700 leading-relaxed bg-white border border-slate-100 p-3 rounded shadow-inner">
+                <div class="space-y-1.5">
+                    <span class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">Description</span>
+                    <p class="m-0 text-sm text-slate-300 bg-slate-950 border border-slate-800/60 p-3.5 rounded-xl leading-relaxed shadow-inner">
                         {{ selected_alert.description }}
                     </p>
                 </div>
 
-                <!-- Incident Metadata Grid Layout -->
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-slate-50 p-3 rounded border border-slate-100">
-                        <span class="text-xs text-slate-400 block font-semibold">TRIGGERED TIME</span>
-                        <span class="text-sm font-mono text-slate-700">{{ useTimeAgo(new Date(selected_alert.triggered_at)) }}</span>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div class="bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/60 flex flex-col justify-center gap-1 shadow-sm">
+                        <span class="text-[10px] text-slate-400 block font-bold uppercase tracking-widest">TRIGGERED TIME</span>
+                        <span class="text-sm font-semibold text-slate-200">{{ useTimeAgo(new Date(selected_alert.triggered_at)) }}</span>
                     </div>
-                    <div class="bg-slate-50 p-3 rounded border border-slate-100">
-                        <span class="text-xs text-slate-400 block font-semibold">STATUS</span>
-                        <p-badge :value="selected_alert.acknowledged ? 'Acknowledged' : 'New Incident'" :severity="selected_alert.acknowledged ? 'success' : 'danger'"></p-badge>
+                    <div class="bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/60 flex flex-col justify-center items-start gap-1.5 shadow-sm">
+                        <span class="text-[10px] text-slate-400 block font-bold uppercase tracking-widest">STATUS</span>
+                        <p-badge :value="selected_alert.acknowledged ? 'Acknowledged' : 'New Incident'" :severity="selected_alert.acknowledged ? 'success' : 'danger'" class="tracking-wide font-semibold px-2 py-0.5 text-[10px]"></p-badge>
                     </div>
-                    <div class="bg-slate-50 p-3 rounded border border-slate-100 col-span-2">
-                        <span class="text-xs text-slate-400 block font-semibold">INCIDENT ID (UUID)</span>
-                        <span class="text-xs font-mono text-slate-600 block truncate">{{ selected_alert.id }}</span>
+                    <div class="bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/60 sm:col-span-2 space-y-1 shadow-sm">
+                        <span class="text-[10px] text-slate-400 block font-bold uppercase tracking-widest">INCIDENT ID (UUID)</span>
+                        <span class="text-xs font-['JetBrains_Mono',monospace] text-indigo-400 block truncate select-all tracking-tight bg-slate-950/60 py-1 px-2 rounded border border-slate-800/40">{{ selected_alert.id }}</span>
                     </div>
                 </div>
 
-                <!-- Raw Log Console Stream -->
-                <div>
-                    <span class="text-xs text-slate-500 block uppercase font-bold tracking-wider mb-1">Raw Log Entry Payload</span>
-                    <pre class="m-0 p-4 bg-slate-900 text-emerald-400 font-mono text-xs rounded-lg overflow-x-auto whitespace-pre-wrap shadow-md border-l-4 border-emerald-500">{{ selected_alert.raw_line }}</pre>
+                <div class="space-y-1.5">
+                    <span class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">Raw Log Entry Payload</span>
+                    <div class="relative group">
+                        <div class="absolute inset-0 bg-gradient-to-r from-emerald-500/5 to-teal-500/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl pointer-events-none"></div>
+                        <pre class="m-0 p-4 bg-slate-950 text-emerald-400 font-['JetBrains_Mono',monospace] text-[11px] rounded-xl overflow-x-auto whitespace-pre-wrap max-h-48 border border-slate-800 shadow-inner leading-relaxed select-all">{{ selected_alert.raw_line }}</pre>
+                    </div>
                 </div>
                 
-                <div class="flex justify-end gap-2">
+                <div class="flex flex-col-reverse sm:flex-row justify-end gap-2.5 mt-2 pt-4 border-t border-slate-800/60 w-full">
                     <p-confirmpopup></p-confirmpopup>
-                    <p-button type="button" label="Delete" severity="danger" @click="confirmDelete($event,selected_alert.id)"></p-button>
-                    <p-button type="button" label="Acknowledge" :disabled="selected_alert.acknowledged" @click="api.patch(`/alerts/${selected_alert.id}/acknowledge`).then(() => fetchAlerts()).then(() => open_select_alert_overlay = false)"></p-button>
+                    <p-button type="button" label="Delete" severity="danger" outlined class="w-full sm:w-auto text-xs font-bold px-4 py-2" @click="confirmDelete($event,selected_alert.id)"></p-button>
+                    <p-button type="button" label="Acknowledge" :disabled="selected_alert.acknowledged" class="w-full sm:w-auto text-xs font-bold px-5 py-2 shadow-md bg-indigo-600 hover:bg-indigo-500 border-none transition" @click="api.patch(`/alerts/${selected_alert.id}/acknowledge`).then(() => fetchAlerts()).then(() => open_select_alert_overlay = false)"></p-button>
                 </div>
             </div>
         </p-dialog>
 
         <div id="main-parent">
-            <div class="topbar || mx-6 my-4 flex justify-between  "> 
-                <div id="left">
-                    <h1 class="text-3xl font-bold cursor-pointer" @click="locReplace('/')">PUSINGBERAT</h1>
+            
+            <div class="topbar || flex flex-col md:flex-row items-center justify-between bg-slate-900/40 backdrop-blur-md p-4 lg:p-0 lg:px-6 rounded-2xl border border-slate-800/80 shadow-[0_8px_30px_rgb(0,0,0,0.3)] gap-4 w-full box-border"> 
+                <div id="left" class="flex flex-col sm:flex-row items-center gap-4 lg:gap-6 w-full md:w-auto">
+                    <div class="flex items-center">
+                        <span class="text-xl font-black tracking-tight text-slate-100 cursor-pointer select-none font-['Outfit',sans-serif]" @click="locReplace('/')">
+                            PUSING<span class="text-indigo-500 font-extrabold tracking-wide drop-shadow-[0_0_15px_rgba(99,102,241,0.3)]">BERAT</span>
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-1 bg-slate-950/40 border border-slate-800/60 p-1 rounded-xl w-full sm:w-auto justify-around sm:justify-start">
+                        <p-button label="alerts" variant="link" size='large' @click="locReplace('/alerts')" class="text-xs font-bold tracking-wide !text-indigo-400 bg-slate-800/40 px-3 py-1.5 rounded-lg"></p-button>
+                        <p-button label="events" variant="link" size='large' @click="locReplace('/events')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
+                        <p-button label="rules" variant="link" size='large' @click="rules_view ? null : locReplace('/rules')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
+                        <p-button label="sources" variant="link" size='large' @click="locReplace('/logsources')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
+                    </div>
                 </div>
 
-                <div id="right">
-                    <span><p-badge :value="halo" severity="danger"></p-badge> Alerts today</span>
+                <div id="right" class="w-full md:w-auto flex justify-center md:justify-end">
+                    <div class="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-full py-1.5 px-3.5 text-xs text-rose-400 font-semibold shadow-[0_0_15px_rgba(244,63,94,0.05)]">
+                        <p-badge :value="totalRecords" severity="danger" class="animate-pulse shadow-sm"></p-badge> 
+                        <span class="tracking-wide">Alerts today</span>
+                    </div>
                 </div>
             </div>
 
-
-            <div class="sidebar"> </div>
-
-
-            <div class="main-dashboard-content">
-                <h1 class="text-3xl font-bold my-5 mx-2">Alerts</h1>
-                <div class="h-[calc(100vh-200px)] w-full">
+            <div class="main-dashboard-content bg-slate-900/20 backdrop-blur-md rounded-2xl border border-slate-800/60 p-4 sm:p-5 flex flex-col justify-between w-full shadow-[0_12px_40px_rgba(0,0,0,0.2)] box-border min-h-[520px] lg:h-full lg:overflow-hidden">
+                
+                <div class="flex items-center justify-between pb-4 border-b border-slate-800/40 flex-shrink-0">
+                    <div class="space-y-0.5">
+                        <h1 class="text-base font-bold text-slate-200 tracking-tight m-0">Alerts Pipeline Manager</h1>
+                        <p class="text-xs text-slate-500">Active real-time telemetry metrics and network anomalies</p>
+                    </div>
+                </div>
+                
+                <div class="w-full flex-1 min-h-0 mt-4 overflow-hidden rounded-xl border border-slate-800/80 shadow-sm bg-slate-950/20 flex flex-col">
                     <p-datatable 
                         :value="recent_alerts" 
                         :loading="loading"
@@ -114,42 +129,55 @@
                         :total-records="total_alerts"
                         @page="onPage($event)"
                         scrollable 
-                        scroll-height="80%"
-                        class="h-full"
+                        scroll-height="flex"
+                        tableStyle="min-width: 50rem"
+                        class="w-full flex-1 flex flex-col justify-between overflow-hidden"
+                        :pt="{
+                            root: { class: 'flex flex-col flex-1 h-full min-h-0 overflow-hidden justify-between bg-transparent' },
+                            wrapper: { class: 'flex-1 min-h-0 overflow-auto' },
+                            paginator: { class: 'flex-shrink-0 border-t border-slate-800/60 bg-slate-950/40' }
+                        }"
                     >
-                        <p-column field="severity" header="Severity" style="width: 25%">
+                        <p-column field="severity" header="Severity" style="width: 15%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
                             <template #body="slotProps">
-                                <p-message :severity="alert_severity_map[slotProps.data.severity]" class="justify-center">
+                                <p-message :severity="alert_severity_map[slotProps.data.severity]" class="justify-center font-bold py-1 text-[10px] uppercase tracking-wider rounded-lg shadow-inner m-0">
                                     {{slotProps.data.severity}}
                                 </p-message>
                             </template>
                         </p-column>
-                        <p-column field="title" header="Title" style="width: 25%"></p-column>
-                        <p-column field="triggered_at" header="Time" style="width: 25%">
+                        
+                        <p-column field="title" header="Title" style="width: 45%" class="font-semibold text-slate-200 tracking-tight text-sm" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider"></p-column>
+                        
+                        <p-column field="triggered_at" header="Time" style="width: 18%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
                             <template #body="slotProps">
-                                {{useTimeAgo(new Date(slotProps.data.time))}}
+                                <span class="text-xs text-slate-400 font-medium tracking-tight">
+                                    {{useTimeAgo(new Date(slotProps.data.time))}}
+                                </span>
                             </template>
                         </p-column>
-                        <p-column field="status" header="Status" style="width: 25%"></p-column>
-                        <p-column field="" header="Action" style="width: 25%">
+                        
+                        <p-column field="status" header="Status" style="width: 12%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
+                            <template #body="slotProps">
+                                <span class="text-xs font-semibold px-2 py-0.5 rounded text-slate-300 bg-slate-950 border border-slate-800">
+                                    {{ slotProps.data.status || 'NEW' }}
+                                </span>
+                            </template>
+                        </p-column>
+                        
+                        <p-column field="" header="Action" style="width: 10%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
                             <template #body="slotProps">
                                 <p-button 
                                     icon="" 
                                     label="View" 
                                     @click="openAlert(slotProps.data.id)" 
-                                    class="p-button-sm" 
+                                    class="p-button-sm text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700/60 transition hover:bg-slate-800" 
                                 />
-                                
                             </template>
                         </p-column>
                     </p-datatable>
                 </div>
-
-
             </div>
 
-
-            
         </div>
     </div>
 

@@ -26,123 +26,83 @@
 <body class="font-[outfit]">
     <div id="app">
 
-        <!-- The Dialog Overlay -->
+        <!-- View Detail Dialog -->
         <p-dialog 
-            v-model:visible="isDialogVisible" 
-            :header="'Log Source Details — ' + (selectedSource?.name || '')" 
-            :modal="true"   
+            v-model:visible="isDetailVisible" 
+            :header="'Rule Details — ' + (selectedRule?.name || '')" 
+            :modal="true"
             :draggable="false"
             :dismissable-mask="true"
             class="w-full max-w-2xl mx-4"
         >
-            <div v-if="selectedSource" class="flex flex-col gap-4 pt-2">
-                
-                <!-- Status Header -->
+            <div v-if="selectedRule" class="flex flex-col gap-4 pt-2">
+                <!-- Header Metadata -->
                 <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-gray-100 dark:border-gray-800">
                     <div class="flex items-center gap-2">
-                        <p-message :severity="statusSeverityMap[selectedSource.status]" class="m-0 px-3 py-1 text-xs font-bold uppercase" icon="">
-                            {{ selectedSource.status }}
+                        <p-message :severity="severityMap[selectedRule.severity]" class="m-0 px-3 py-1 text-xs font-bold uppercase" icon="">
+                            {{ selectedRule.severity }}
                         </p-message>
-                        <span class="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-gray-700 dark:text-gray-300">
-                            {{ selectedSource.log_type }}
-                        </span>
+                        <p-badge :value="selectedRule.enabled ? 'Enabled' : 'Disabled'" :severity="selectedRule.enabled ? 'success' : 'secondary'"></p-badge>
                     </div>
-                    <span class="text-xs font-mono text-gray-400">ID: {{ selectedSource.id }}</span>
-                </div>
-
-                <!-- Source Information Grid -->
-                <div class="grid grid-cols-3 gap-y-3 gap-x-4 text-xs bg-gray-50 dark:bg-gray-900 p-4 rounded border border-gray-100 dark:border-gray-800">
-                    <div class="font-semibold text-gray-500 uppercase">File Path:</div>
-                    <div class="col-span-2 font-mono text-gray-700 dark:text-gray-300 break-all bg-white dark:bg-gray-800 p-1 px-2 rounded border border-gray-100 dark:border-gray-700">
-                        {{ selectedSource.file_path }}
-                    </div>
-
-                    <div class="font-semibold text-gray-500 uppercase">Registered:</div>
-                    <div class="col-span-2 font-mono">{{ new Date(selectedSource.created_at).toLocaleString() }}</div>
-
-                    <div class="font-semibold text-gray-500 uppercase">Last Updated:</div>
-                    <div class="col-span-2 font-mono">{{ new Date(selectedSource.updated_at).toLocaleString() }}</div>
+                    <span class="text-xs font-mono text-gray-400">ID: {{ selectedRule.id }}</span>
                 </div>
 
                 <!-- Description -->
                 <div class="flex flex-col gap-1">
                     <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Description</span>
-                    <div class="text-sm p-3 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded shadow-sm italic text-gray-600">
-                        {{ selectedSource.description || 'No description provided for this log source.' }}
+                    <div class="text-sm p-3 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded shadow-sm text-gray-600 whitespace-pre-wrap">
+                        {{ selectedRule.description || 'No description provided.' }}
                     </div>
+                </div>
+
+                <!-- YAML Content -->
+                <div class="flex flex-col gap-1">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">YAML Configuration</span>
+                    <pre class="p-3 bg-gray-950 text-amber-400 font-mono text-xs rounded overflow-x-auto border border-gray-900 shadow-inner"><code>{{ selectedRule.yaml_content }}</code></pre>
                 </div>
 
                 <!-- Actions Footer -->
                 <div class="flex justify-end gap-2 border-t pt-4 border-gray-100 dark:border-gray-800">
                     <p-confirmpopup></p-confirmpopup>
-                    <p-button label="Delete Source" severity="danger" text @click="confirmDelete($event,selectedSource.id)"></p-button>
-                    <!-- <p-button label="Delete Source" severity="danger" text @click=""></p-button> -->
-                    <p-button label="Edit Configuration" icon="pi pi-pencil" severity="secondary" @click="isDialogVisible = false"></p-button>
-                    <p-button label="Close" icon="pi pi-check" @click="isDialogVisible = false"></p-button>
+                    <p-button label="Delete" severity="danger" text @click="confirmDelete($event,selectedRule.id)"></p-button>
+                    <p-button label="Edit Rule" icon="pi pi-pencil" severity="secondary" @click="showEditDialog(selectedRule)"></p-button>
+                    <p-button label="Close" icon="pi pi-check" @click="isDetailVisible = false"></p-button>
                 </div>
-
             </div>
         </p-dialog>
 
-        <!-- Add Source Dialog -->
-        <p-dialog v-model:visible="isAddVisible" header="Register New Log Source" modal class="w-full max-w-lg mx-4">
+        <!-- Add/Edit Form Dialog -->
+        <p-dialog v-model:visible="isFormVisible" :header="form.id ? 'Edit Detection Rule' : 'Create New Rule'" modal class="w-full max-w-xl mx-4">
             <div class="flex flex-col gap-4 pt-2">
                 <p-fluid class="flex flex-col gap-4">
                     <div class="flex flex-col gap-1">
-                        <label for="name" class="text-xs font-bold text-gray-500 uppercase">Source Name</label>
-                        <p-inputtext id="name" v-model="form.name" placeholder="e.g. System Syslog" />
+                        <label for="name" class="text-xs font-bold text-gray-500 uppercase">Rule Name</label>
+                        <p-inputtext id="name" v-model="form.name" placeholder="e.g. SSH Brute Force" />
                     </div>
                     <div class="flex flex-col gap-1">
-                        <label for="path" class="text-xs font-bold text-gray-500 uppercase">File Path</label>
-                        <p-inputtext id="path" v-model="form.file_path" placeholder="/var/log/syslog" />
-                    </div>
-                    <div class="flex flex-col gap-1">
-                        <label for="type" class="text-xs font-bold text-gray-500 uppercase">Log Type</label>
-                        <p-select id="type" v-model="form.log_type" :options="logTypeOptions" placeholder="Select Type" />
+                        <label for="severity" class="text-xs font-bold text-gray-500 uppercase">Severity</label>
+                        <p-select id="severity" v-model="form.severity" :options="severityOptions" placeholder="Select Severity" />
                     </div>
                     <div class="flex flex-col gap-1">
                         <label for="desc" class="text-xs font-bold text-gray-500 uppercase">Description</label>
-                        <p-textarea id="desc" v-model="form.description" rows="3" auto-resize placeholder="Describe this log source..." />
+                        <p-textarea id="desc" v-model="form.description" rows="2" auto-resize placeholder="Describe what this rule detects..." />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label for="yaml" class="text-xs font-bold text-gray-500 uppercase">YAML Configuration</label>
+                        <p-textarea id="yaml" v-model="form.yaml_content" rows="8" class="font-mono text-sm" placeholder="id: rule-id..." />
                     </div>
                 </p-fluid>
                 <div class="flex justify-end gap-2 border-t pt-4 mt-2">
-                    <p-button label="Cancel" severity="secondary" text @click="isAddVisible = false"></p-button>
-                    <p-button label="Create Source" icon="pi pi-plus" @click="handleAdd"></p-button>
+                    <p-button label="Cancel" severity="secondary" text @click="isFormVisible = false"></p-button>
+                    <p-button :label="form.id ? 'Save Changes' : 'Create Rule'" icon="pi pi-check" @click="handleSubmit"></p-button>
                 </div>
             </div>
         </p-dialog>
-
-        <!-- Edit Status Dialog -->
-        <p-dialog v-model:visible="isEditVisible" :header="'Update Status — ' + selectedSource?.name" modal class="w-full max-w-sm mx-4">
-            <div class="flex flex-col gap-4 pt-2">
-                <div class="bg-gray-50 dark:bg-gray-900 p-3 rounded border border-gray-100 dark:border-gray-800 text-xs">
-                    <span class="text-gray-500 font-semibold uppercase">Current Status: </span>
-                    <span class="font-mono font-bold uppercase" :class="selectedSource?.status === 'active' ? 'text-emerald-500' : 'text-amber-500'">{{ selectedSource?.status }}</span>
-                </div>
-                <p-fluid class="flex flex-col gap-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase">New Status</label>
-                    <p-select v-model="form.status" :options="statusOptions" placeholder="Choose Status" />
-                </p-fluid>
-                <div class="flex justify-end gap-2 border-t pt-4 mt-2">
-                    <p-button label="Cancel" severity="secondary" text @click="isEditVisible = false"></p-button>
-                    <p-button label="Save Changes" icon="pi pi-save" @click="handleEdit"></p-button>
-                </div>
-            </div>
-        </p-dialog>
-        
 
         <div id="main-parent">
-            <div class="topbar || mx-6 my-4 flex justify-between  "> 
-                <div id="left" class="flex items-center-safe">
-                    <div class="flex items-center mx-3">
-                        <span class="text-3xl font-bold cursor-pointer items-center" @click="locReplace('/')">PUSINGBERAT</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <p-button label="alerts" variant="link" size='large' @click="locReplace('/alerts')"></p-button>
-                        <p-button label="events" variant="link" size='large' @click="locReplace('/events')"></p-button>
-                        <p-button label="rules" variant="link" size='large' @click="locReplace('/rules')"></p-button>
-                        <p-button label="sources" variant="link" size='large' @click="locReplace('/logsources')"></p-button>
-                    </div>
+            <div class="topbar || mx-6 my-4 flex justify-between"> 
+                <div id="left">
+                    <h1 class="text-3xl font-bold cursor-pointer" @click="locReplace('/')">PUSINGBERAT</h1>
                 </div>
 
                 <div id="right">
@@ -156,23 +116,22 @@
 
             <div class="main-dashboard-content || w-full max-w-full ">
                 <div class="flex justify-between items-center mr-7">
-                    <h1 class="text-3xl font-bold my-5 mx-2">Log Sources</h1>
+                    <h1 class="text-3xl font-bold my-5 mx-2">Detection Rules</h1>
                     <div>
                         <p-button 
-                            icon="" 
-                            label="+ Add" 
+                            icon="pi pi-plus" 
+                            label="New Rule" 
                             @click="showAddDialog"
-                            class="p-button-md"
+                            class="p-button-sm"
                             rounded 
                         ></p-button>
                     </div>
                 </div>
                 
-                
                 <!-- DataTable Container -->
                 <div class="h-[calc(100vh-200px)] w-full">
                     <p-datatable 
-                        :value="logSources" 
+                        :value="rules" 
                         :loading="loading"
                         :lazy="true"
                         :paginator="true"
@@ -180,34 +139,35 @@
                         :total-records="totalRecords"
                         @page="onPage($event)"
                         scrollable 
-                        scroll-height="80%"
+                        scroll-height="100%"
                         class="w-full h-full"
                     >
-                        <p-column field="status" header="Status" class="w-1/6 min-w-[120px]">
+                        <p-column field="severity" header="Severity" class="w-1/6 min-w-[120px]">
                             <template #body="slotProps">
-                                <p-message :severity="statusSeverityMap[slotProps.data.status]" class="justify-center m-0 uppercase text-xs font-bold">
-                                    {{ slotProps.data.status }}
+                                <p-message :severity="severityMap[slotProps.data.severity]" class="justify-center m-0 uppercase text-xs font-bold">
+                                    {{ slotProps.data.severity }}
                                 </p-message>    
                             </template>
                         </p-column>
                         
-                        <p-column field="name" header="Log Name" class="w-1/4 min-w-[250px]"></p-column>
+                        <p-column field="name" header="Rule Name" class="w-1/3 min-w-[250px]"></p-column>
                         
-                        <p-column field="file_path" header="Path" class="w-1/4 min-w-[200px]">
+                        <p-column field="enabled" header="Status" class="w-1/6 min-w-[150px]">
                             <template #body="slotProps">
-                                <span class="font-mono text-xs truncate block max-w-[250px]">{{ slotProps.data.file_path }}</span>
+                                <div class="flex items-center gap-2">
+                                    <p-toggleswitch v-model="slotProps.data.enabled" @change="handleToggle(slotProps.data.id)" />
+                                    <span class="text-xs font-semibold">{{ slotProps.data.enabled ? 'Active' : 'Disabled' }}</span>
+                                </div>
                             </template>
                         </p-column>
 
-                        <p-column field="log_type" header="Type" class="w-1/4 min-w-[150px]"></p-column>
-                        
-                        <p-column header="Action" class="w-1/6 min-w-[180px]">
+                        <p-column header="Actions" class="w-1/4 min-w-[200px]">
                             <template #body="slotProps">
-                                <div class="flex justify-around">
+                                <div class="flex gap-2">
                                     <p-button 
                                         icon="" 
                                         label="View" 
-                                        @click="openSourceDetail(slotProps.data.id)" 
+                                        @click="openRuleDetail(slotProps.data.id)" 
                                         severity="info"
                                         class="p-button-sm " 
                                     ></p-button>
@@ -216,6 +176,14 @@
                                         label="Edit" 
                                         severity="secondary"
                                         @click="showEditDialog(slotProps.data)"
+                                        class="p-button-sm" 
+                                    ></p-button>
+                                    <p-confirmpopup></p-confirmpopup>
+                                    <p-button 
+                                        icon="" 
+                                        label="Delete"
+                                        severity="danger"
+                                        @click="confirmDelete($event,slotProps.data.id)"
                                         class="p-button-sm" 
                                     ></p-button>
                                 </div>
@@ -304,7 +272,8 @@
                 stats: '/stats/overview',
                 alerts: '/alerts',
                 events: '/events',
-                sources: '/sources'
+                sources: '/sources',
+                rules: '/rules'
             }
         };
 
@@ -321,36 +290,42 @@
 
     const app = createApp({
     setup() {
-
-        
-
-        const perPage = 20  
-
-        const logSources = ref([]);
+        const rules = ref([]);
         const loading = ref(false);
         const totalRecords = ref(0);
         const currentPage = ref(1);
+        const perPage = 20;
 
-        const isDialogVisible = ref(false)
-        const isAddVisible = ref(false)
-        const isEditVisible = ref(false)
-        const selectedSource = ref(null)
+        const isDetailVisible = ref(false)
+        const isFormVisible = ref(false)
+        const selectedRule = ref(null)
 
         const form = reactive({
+            id: null,
             name: '',
-            file_path: '',
-            log_type: 'generic',
+            yaml_content: '',
+            severity: 'medium',
             description: '',
-            status: 'active'
+            enabled: true
         })
 
-        const logTypeOptions = ref(['syslog', 'nginx', 'generic'])
-        const statusOptions = ref(['active', 'inactive', 'error'])
+        const severityOptions = ref(['info', 'low', 'medium', 'high', 'critical'])
+
 
         function locReplace(target) {
             window.location.replace(target);
         }
 
+        const handleDelete = async (id) => {
+            
+            const res = await api.delete(`/rules/${id}`);
+            if (res.success || res.data) {
+                isDetailVisible.value = false;
+                fetchRules(currentPage.value, perPage);
+            }
+        };
+
+        handleDelete(selectedRule.id)
         const confirm = PrimeVue.useConfirm();
         const confirmDelete = (event, id) => {
             confirm.require({
@@ -367,7 +342,7 @@
                     severity: 'danger'
                 },
                 accept: () => {
-                    api.delete(`/sources/${id}`).then(() => fetchLogSources()).then(() => isDialogVisible.value = false)
+                    handleDelete(id)
                 },
                 reject: () => {
                     
@@ -375,89 +350,97 @@
             });
         };
 
-        async function openSourceDetail(id) {
-            const res = await api.get(`/sources/${id}`);
+        async function openRuleDetail(id) {
+            const res = await api.get(`/rules/${id}`);
             if (res.data) {
-                selectedSource.value = res.data; 
-                isDialogVisible.value = true;
+                const data = res.data;
+                // Convert literal \n sequences into actual newline characters for proper rendering
+                if (data.yaml_content) data.yaml_content = data.yaml_content.replace(/\\n/g, '\n');
+                if (data.description) data.description = data.description.replace(/\\n/g, '\n');
+                
+                selectedRule.value = data; 
+                isDetailVisible.value = true;
             }
         }
 
         const showAddDialog = () => {
-            Object.assign(form, { name: '', file_path: '', log_type: 'generic', description: '' });
-            isAddVisible.value = true;
+            Object.assign(form, { id: null, name: '', yaml_content: '', severity: 'medium', description: '', enabled: true });
+            isFormVisible.value = true;
         };
 
-        const showEditDialog = (source) => {
-            selectedSource.value = source;
-            form.status = source.status;
-            isEditVisible.value = true;
-        };
-
-        const handleAdd = async () => {
-            const res = await api.post(api.endpoints.sources, {
-                name: form.name,
-                file_path: form.file_path,
-                log_type: form.log_type,
-                description: form.description
+        const showEditDialog = (rule) => {
+            Object.assign(form, { 
+                id: rule.id, 
+                name: rule.name, 
+                yaml_content: rule.yaml_content, 
+                severity: rule.severity, 
+                description: rule.description,
+                enabled: rule.enabled
             });
+            isFormVisible.value = true;
+        };
+
+        const handleSubmit = async () => {
+            let res;
+            if (form.id) {
+                res = await api.put(`/rules/${form.id}`, { ...form });
+            } else {
+                res = await api.post(api.endpoints.rules, { ...form });
+            }
+
             if (res.data) {
-                isAddVisible.value = false;
-                await fetchLogSources(currentPage.value, perPage);
+                isFormVisible.value = false;
+                fetchRules(currentPage.value, perPage);
             }
         };
 
-        const handleEdit = async () => {
-            if (!selectedSource.value) return;
-            
-            const res = await api.patch(`${api.endpoints.sources}/${selectedSource.value.id}`, {
-                status: form.status
-            });
-            
-            if (res.data) {
-                isEditVisible.value = false;
-                fetchLogSources(currentPage.value, perPage);
-            }
+        const handleToggle = async (id) => {
+            await api.patch(`/rules/${id}/toggle`);
+            // UI state is handled by table v-model
         };
 
+        
 
-        async function fetchLogSources(page = 1, limit = perPage) {
+        async function fetchRules(page = 1, limit = perPage) {
             loading.value = true
-            const sourceRes = await api.get(`${api.endpoints.sources}?page=${page}&per_page=${limit}`);
-            if (sourceRes.data) {
-                logSources.value = sourceRes.data
-                totalRecords.value = sourceRes.meta?.total || sourceRes.data.length;
+            const rulesRes = await api.get(`${api.endpoints.rules}?page=${page}&per_page=${limit}`);
+            if (rulesRes.data) {
+                // Map through the rules to fix any literal \n strings coming from the backend
+                rules.value = rulesRes.data.map(rule => ({
+                    ...rule,
+                    yaml_content: rule.yaml_content ? rule.yaml_content.replace(/\\n/g, '\n') : '',
+                    description: rule.description ? rule.description.replace(/\\n/g, '\n') : ''
+                }));
+                totalRecords.value = rulesRes.meta?.total || rulesRes.data.length;
             }
-
             loading.value = false
         }
 
         const onPage = async (event) => {
             currentPage.value = event.page + 1;
-            await fetchLogSources(currentPage.value, perPage)
+            await fetchRules(currentPage.value, perPage);
         };
 
-        const statusSeverityMap = {
-            'active' : 'success',
-            'inactive' : 'warn',
-            'error' : 'error'
+        const severityMap = {
+            'critical' : 'error',
+            'high' : 'warn',
+            'medium' : 'info',
+            'low' : 'secondary',
+            'info' : 'secondary'
         }
 
         onMounted(async () => {
-            await fetchLogSources(1, perPage);
+            await fetchRules(currentPage.value, perPage);
         });
 
         return {
-            isDialogVisible,
-            isAddVisible,
-            isEditVisible,
-            selectedSource,
+            isDetailVisible,
+            isFormVisible,
+            selectedRule,
             form,
-            logTypeOptions,
-            statusOptions,
-
-            statusSeverityMap,
-            logSources,
+            severityOptions,
+            severityMap,
+            rules,
             totalRecords,
             perPage,
 
@@ -468,12 +451,13 @@
             useTimeAgo,
             confirmDelete,
             locReplace,
-            fetchLogSources,
-            openSourceDetail,
+            fetchRules,
+            openRuleDetail,
             showAddDialog,
             showEditDialog,
-            handleAdd,
-            handleEdit,
+            handleSubmit,
+            handleToggle,
+            handleDelete,
             onPage
         }
 
@@ -487,7 +471,7 @@
         }
     });
 
-    
+
     app.component('p-chip', PrimeVue.Chip);
     app.component('p-badge', PrimeVue.Badge);
     app.component('p-card', PrimeVue.Card);
@@ -500,9 +484,11 @@
     app.component('p-select', PrimeVue.Select);
     app.component('p-textarea', PrimeVue.Textarea);
     app.component('p-fluid', PrimeVue.Fluid);
-    
+    app.component('p-toggleswitch', PrimeVue.ToggleSwitch );
+
     app.component('p-confirmpopup', PrimeVue.ConfirmPopup);
     app.use(PrimeVue.ConfirmationService);
+
 
     app.mount('#app');
     </script>

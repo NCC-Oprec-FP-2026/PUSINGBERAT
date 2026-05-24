@@ -19,7 +19,7 @@ services:
             - postgres_dev_data:/var/lib/postgresql/data
             - ../backend/migrations/001_create_tables.sql:/docker-entrypoint-initdb.d/001_create_tables.sql:ro
             - ../backend/migrations/002_add_indexes.sql:/docker-entrypoint-initdb.d/002_add_indexes.sql:ro
-            - ../backend/migrations/003_seed_data.sql:/docker-entrypoint-initdb.d/003_seed_data.sql:ro
+            # - ../backend/migrations/003_seed_data.sql:/docker-entrypoint-initdb.d/003_seed_data.sql:ro
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-siem} -d ${POSTGRES_DB:-pusingberat}"]
             interval: 5s

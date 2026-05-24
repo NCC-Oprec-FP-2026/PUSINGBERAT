@@ -24,7 +24,7 @@
     <link rel="stylesheet" href="/statics/css/events/style.css">
 </head>
 <body class="font-[outfit]">
-    <div id="app" class="min-h-screen bg-[#030712] text-slate-100 font-['Outfit',sans-serif] antialiased selection:bg-indigo-500/30 selection:text-indigo-200 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900/40 via-[#030712] to-[#030712]">
+    <div id="app">
 
         <!-- The Dialog Overlay -->
         <p-dialog 
@@ -33,98 +33,81 @@
             :modal="true" 
             :draggable="false"
             :dismissable-mask="true"
-            class="w-full max-w-2xl mx-4 backdrop-blur-md"
+            class="w-full max-w-2xl mx-4"
         >
-            <div v-if="selected_record" class="flex flex-col gap-5 pt-4">
+            <div v-if="selected_record" class="flex flex-col gap-4 pt-2">
                 
                 <!-- Metadata Row Header -->
-                <div class="flex flex-wrap items-center justify-between gap-3 border-b pb-4 border-slate-800/60">
-                    <div class="flex items-center gap-2.5">
-                        <p-message :severity="events_severity_map[selected_record.log_level]" class="m-0 px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-lg shadow-inner">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-gray-100 dark:border-gray-800">
+                    <div class="flex items-center gap-2">
+                        <p-message :severity="events_severity_map[selected_record.log_level]" class="m-0 px-3 py-1 text-xs font-bold">
                             {{ selected_record.log_level }}
                         </p-message>
-                        <span class="text-xs font-['JetBrains_Mono',monospace] bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg text-slate-300">
+                        <span class="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-gray-700 dark:text-gray-300">
                             {{ selected_record.process }}
                         </span>
                     </div>
-                    <span class="text-xs font-['JetBrains_Mono',monospace] text-slate-400 bg-slate-950/40 px-2.5 py-1 rounded border border-slate-900">Host: {{ selected_record.hostname }}</span>
+                    <span class="text-xs font-mono text-gray-400">Host: {{ selected_record.hostname }}</span>
                 </div>
 
                 <!-- Structural Info Grid -->
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-y-2.5 gap-x-4 text-xs bg-slate-900/40 p-4 rounded-xl border border-slate-800/60 shadow-sm">
-                    <div class="font-bold text-indigo-400 uppercase tracking-wider text-[10px] flex items-center">Log Source ID:</div>
-                    <div class="sm:col-span-2 font-['JetBrains_Mono',monospace] text-slate-300 break-all bg-slate-950/40 px-2 py-1 rounded border border-slate-900/60">{{ selected_record.log_source_id }}</div>
+                <div class="grid grid-cols-3 gap-y-2 gap-x-4 text-xs bg-gray-50 dark:bg-gray-900 p-3 rounded border border-gray-100 dark:border-gray-800">
+                    <div class="font-semibold text-gray-500">Log Source ID:</div>
+                    <div class="col-span-2 font-mono text-gray-600 dark:text-gray-400 break-all">{{ selected_record.log_source_id }}</div>
 
-                    <div class="font-bold text-slate-400 uppercase tracking-wider text-[10px] flex items-center">Event Time:</div>
-                    <div class="sm:col-span-2 font-['JetBrains_Mono',monospace] text-slate-200 bg-slate-950/40 px-2 py-1 rounded border border-slate-900/60">{{ new Date(selected_record.event_time).toLocaleString() }}</div>
+                    <div class="font-semibold text-gray-500">Event Time:</div>
+                    <div class="col-span-2 font-mono">{{ new Date(selected_record.event_time).toLocaleString() }}</div>
 
-                    <div class="font-bold text-slate-400 uppercase tracking-wider text-[10px] flex items-center">Received At:</div>
-                    <div class="sm:col-span-2 font-['JetBrains_Mono',monospace] text-slate-200 bg-slate-950/40 px-2 py-1 rounded border border-slate-900/60">{{ new Date(selected_record.received_at).toLocaleString() }}</div>
+                    <div class="font-semibold text-gray-500">Received At:</div>
+                    <div class="col-span-2 font-mono">{{ new Date(selected_record.received_at).toLocaleString() }}</div>
                 </div>
 
                 <!-- Main Cleaned Message -->
-                <div class="flex flex-col gap-1.5">
-                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Message</span>
-                    <div class="text-sm p-4 bg-slate-950 border border-slate-800/80 rounded-xl leading-relaxed text-slate-200 shadow-inner">
+                <div class="flex flex-col gap-1">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Message</span>
+                    <div class="text-sm p-3 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded shadow-sm">
                         {{ selected_record.message }}
                     </div>
                 </div>
 
                 <!-- Raw Syslog Line (Terminal style preview) -->
-                <div class="flex flex-col gap-1.5">
-                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Raw Line Content</span>
-                    <div class="relative group">
-                        <div class="absolute inset-0 bg-gradient-to-r from-emerald-500/5 to-teal-500/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl pointer-events-none"></div>
-                        <pre class="m-0 p-4 bg-slate-950 text-emerald-400 font-['JetBrains_Mono',monospace] text-[11px] rounded-xl overflow-x-auto whitespace-pre-wrap break-all border border-slate-800 shadow-inner leading-relaxed select-all"><code>{{ selected_record.raw_line }}</code></pre>
-                    </div>
+                <div class="flex flex-col gap-1">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Raw Line Content</span>
+                    <pre class="p-3 bg-gray-950 text-emerald-400 font-mono text-xs rounded overflow-x-auto whitespace-pre-wrap break-all border border-gray-900 shadow-inner"><code>{{ selected_record.raw_line }}</code></pre>
                 </div>
 
                 <!-- Extra Unstructured Metadata Block -->
-                <div class="flex flex-col gap-1.5">
-                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Extra Metadata Context</span>
-                    <div class="bg-slate-950 rounded-xl border border-slate-800 p-3.5 max-h-[160px] overflow-y-auto shadow-inner">
-                        <pre v-if="Object.keys(selected_record.extra || {}).length" class="text-[11px] font-['JetBrains_Mono',monospace] m-0 text-indigo-300 leading-normal select-all"><code>{{ JSON.stringify(selected_record.extra, null, 2) }}</code></pre>
-                        <div v-else class="text-xs text-slate-500 italic py-2 text-center tracking-wide">No extra context key-values present for this log line instance.</div>
+                <div class="flex flex-col gap-1">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Extra Metadata Context</span>
+                    <div class="bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-800 p-2 max-h-[150px] overflow-y-auto">
+                        <pre v-if="Object.keys(selected_record.extra || {}).length" class="text-xs font-mono m-0"><code>{{ JSON.stringify(selected_record.extra, null, 2) }}</code></pre>
+                        <div v-else class="text-xs text-gray-400 italic p-1 text-center">No extra context key-values present for this log line instance.</div>
                     </div>
                 </div>
 
             </div>
         </p-dialog>
 
-        <div id="main-parent" class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-            <div class="topbar || flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900/40 backdrop-blur-md p-4 sm:p-5 rounded-2xl border border-slate-800/80 mb-8 shadow-[0_8px_30px_rgb(0,0,0,0.3)] gap-4"> 
-                <div id="left" class="flex flex-col md:flex-row items-start md:items-center gap-4 w-full sm:w-auto">
-                    <div class="flex items-center">
-                        <span class="text-xl font-900 tracking-tight text-slate-100 cursor-pointer select-none font-['Outfit',sans-serif]" @click="locReplace('/')">
-                            PUSING<span class="text-indigo-500 font-extrabold tracking-wide drop-shadow-[0_0_15px_rgba(99,102,241,0.3)]">BERAT</span>
-                        </span>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-1 bg-slate-950/40 border border-slate-800/60 p-1 rounded-xl">
-                        <p-button label="alerts" variant="link" size='large' @click="locReplace('/alerts')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
-                        <p-button label="events" variant="link" size='large' @click="locReplace('/events')" class="text-xs font-bold tracking-wide !text-indigo-400 bg-slate-800/40 px-3 py-1.5 rounded-lg"></p-button>
-                        <p-button label="rules" variant="link" size='large' @click="locReplace('/rules')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
-                        <p-button label="sources" variant="link" size='large' @click="locReplace('/logsources')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
-                    </div>
+        <div id="main-parent">
+            <div class="topbar || mx-6 my-4 flex justify-between  "> 
+                <div id="left">
+                    <h1 class="text-3xl font-bold cursor-pointer" @click="locReplace('/')">PUSINGBERAT</h1>
                 </div>
 
-                <div id="right" class="w-full sm:w-auto flex justify-end">
-                    <div class="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-full py-1.5 px-3.5 text-xs text-rose-400 font-semibold shadow-[0_0_15px_rgba(244,63,94,0.05)]">
-                        <p-badge :value="totalRecords" severity="danger" class="animate-pulse shadow-sm"></p-badge> 
-                        <span class="tracking-wide">Alerts today</span>
-                    </div>
+                <div id="right">
+                    <span><p-badge :value="totalRecords" severity="danger"></p-badge> Alerts today</span>
                 </div>
             </div>
 
-            <div class="main-dashboard-content || bg-slate-900/20 backdrop-blur-md rounded-2xl border border-slate-800/60 p-5 sm:p-6 shadow-[0_12px_40px_rgba(0,0,0,0.2)] w-full max-w-full">
-                <div class="flex items-center justify-between mb-6 pb-4 border-b border-slate-800/40">
-                    <div class="space-y-0.5">
-                        <h1 class="text-base font-bold text-slate-200 tracking-tight m-0">System Events Registry</h1>
-                        <p class="text-xs text-slate-500">Unstructured syslog aggregation context and raw line parsing streams</p>
-                    </div>
-                </div>
+
+            <div class="sidebar"> </div>
+
+
+            <div class="main-dashboard-content || w-full max-w-full ">
+                <h1 class="text-3xl font-bold my-5 mx-2">Events</h1>
                 
                 <!-- 2. Wrap the table in a container with a defined height context if using scroll-height="100%" -->
-                <div class="max-h-[calc(100vh-260px)] w-full overflow-hidden rounded-xl border border-slate-800/80 shadow-sm bg-slate-950/20 h-[80%]">
+                <div class="h-[calc(100vh-200px)] w-full">
                     <p-datatable 
                         :value="records_data" 
                         :loading="loading"
@@ -134,32 +117,30 @@
                         :total-records="total_data"
                         @page="onPage($event)"
                         scrollable 
-                        scroll-height="90%"
-                        class="w-full h-full p-datatable-sm"
+                        scroll-height="80%"
+                        class="w-full h-full"
                     >
                         <!-- 3. Use layout-responsive styles or rem bounds instead of strict 25% if text items are wide -->
-                        <p-column field="log_level" header="Level" class="w-1/4 min-w-[110px]">
+                        <p-column field="log_level" header="Level" class="w-1/4 min-w-[100px]">
                             <template #body="slotProps">
-                                <p-message :severity="events_severity_map[slotProps.data.log_level]" class="justify-center font-bold py-1 text-[10px] uppercase tracking-wider rounded-lg shadow-inner m-0">
+                                <p-message :severity="events_severity_map[slotProps.data.log_level]" class="justify-center m-0">
                                     {{slotProps.data.log_level}}
                                 </p-message>    
                             </template>
                         </p-column>
                         
                         <!-- 4. Add template truncation to the message column so long logs don't stretch the cell -->
-                        <p-column field="message" header="Message" class="w-1/2 min-w-[280px]">
+                        <p-column field="message" header="Message" class="w-1/4 min-w-[250px]">
                             <template #body="slotProps">
-                                <div class="truncate max-w-[400px] font-medium text-slate-300 tracking-tight text-xs" :title="slotProps.data.message">
+                                <div class="truncate max-w-[300px]" :title="slotProps.data.message">
                                     {{slotProps.data.message}}
                                 </div>
                             </template>
                         </p-column>
                         
-                        <p-column field="triggered_at" header="Event Time" class="w-1/4 min-w-[180px]">
+                        <p-column field="triggered_at" header="Event Time" class="w-1/4 min-w-[150px]">
                             <template #body="slotProps">
-                                <span class="text-xs font-['JetBrains_Mono',monospace] text-slate-400 tracking-tight">
-                                    {{new Date(slotProps.data.event_time).toLocaleString()}}
-                                </span>
+                                {{new Date(slotProps.data.event_time).toLocaleString()}}
                             </template>
                         </p-column>
                         
@@ -169,13 +150,15 @@
                                     icon="" 
                                     label="View" 
                                     @click="openEvent(slotProps.data.id)" 
-                                    class="p-button-sm text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700/60 transition hover:bg-slate-800" 
+                                    class="p-button-sm" 
                                 />
                             </template>
                         </p-column>
                     </p-datatable>
                 </div>
             </div>
+
+
             
         </div>
     </div>

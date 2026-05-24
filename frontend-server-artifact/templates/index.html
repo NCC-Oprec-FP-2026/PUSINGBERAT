@@ -89,22 +89,15 @@
 
         <div id="main-parent">
             <div class="topbar || mx-6 my-4 flex justify-between  "> 
-                <div id="left" class="flex items-center-safe">
-                    <div class="flex items-center mx-3">
-                        <span class="text-3xl font-bold cursor-pointer items-center" @click="locReplace('/')">PUSINGBERAT</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <p-button label="alerts" variant="link" size='large' @click="locReplace('/alerts')"></p-button>
-                        <p-button label="events" variant="link" size='large' @click="locReplace('/events')"></p-button>
-                        <p-button label="rules" variant="link" size='large' @click="locReplace('/rules')"></p-button>
-                        <p-button label="sources" variant="link" size='large' @click="locReplace('/logsources')"></p-button>
-                    </div>
+                <div id="left">
+                    <h1 class=" cursor-pointer text-3xl font-bold " @click="locReplace('/')">PUSINGBERAT</h1>
                 </div>
 
                 <div id="right">
-                    <span><p-badge :value="totalRecords" severity="danger"></p-badge> Alerts today</span>
+                    <span><p-badge :value="halo" severity="danger"></p-badge> Alerts today</span>
                 </div>
             </div>
+            <div class="sidebar"> </div>
             <div class="important_metrics || flex justify-around h-48 " > 
                 <p-card class="w-1/5">
                     <template #title>Total Events</template>

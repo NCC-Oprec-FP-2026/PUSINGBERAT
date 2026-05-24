@@ -1,5 +1,6 @@
 @import "tailwindcss";
 
+
 body {
     font-family: "Outfit", sans-serif;
     min-height: 100vh;
@@ -8,6 +9,7 @@ body {
     background-color: #030712;
 }
 
+/* Base style optimized for responsive stacking on mobile/tablet */
 #main-parent {
     display: flex;
     flex-direction: column;
@@ -17,10 +19,10 @@ body {
     width: 100%;
 }
 
+/* Explicit Grid is only applied to Desktop environments to prevent layout compression */
 @media (min-width: 1024px) {
-    body, html {
+    body {
         height: 100vh;
-        max-height: 100vh;
         overflow: hidden;
     }
 
@@ -30,7 +32,6 @@ body {
         grid-template-rows: repeat(8, 1fr);
         height: 100vh;
         max-height: 100vh;
-        padding: 24px;
         overflow: hidden;
     }
 

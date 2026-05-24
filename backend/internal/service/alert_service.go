@@ -20,7 +20,7 @@ type AlertRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Alert, error)
 	List(ctx context.Context, params repository.AlertListParams) ([]domain.Alert, int64, error)
 	Acknowledge(ctx context.Context, id uuid.UUID) (*domain.Alert, error)
-	GetSeverityCounts(ctx context.Context) (map[string]int64, error)
+	// GetSeverityCounts(ctx context.Context) (map[string]int64, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	MarkDiscordSent(ctx context.Context, id uuid.UUID) error
 	GetAlertsBySeverity(ctx context.Context) (map[string]int64, error)
@@ -77,7 +77,7 @@ func (s *AlertService) Acknowledge(ctx context.Context, id uuid.UUID) (*domain.A
 
 // GetSeverityCounts retrieves a map of severity levels to alert counts from the repository.
 func (s *AlertService) GetSeverityCounts(ctx context.Context) (map[string]int64, error) {
-	counts, err := s.repo.GetSeverityCounts(ctx)
+	counts, err := s.repo.GetAlertsBySeverity(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("alertService.GetSeverityCounts: %w", err)
 	}

@@ -24,59 +24,55 @@
     <link rel="stylesheet" href="/statics/css/events/style.css">
 </head>
 <body class="font-[outfit]">
-    <div id="app">
+<div id="app" class="min-h-screen lg:h-screen lg:max-h-screen bg-[#030712] text-slate-100 font-['Outfit',sans-serif] antialiased selection:bg-indigo-500/30 selection:text-indigo-200 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900/40 via-[#030712] to-[#030712] overflow-x-hidden lg:overflow-hidden">
 
-        <!-- The Dialog Overlay -->
         <p-dialog 
             v-model:visible="isDialogVisible" 
             :header="'Log Source Details — ' + (selectedSource?.name || '')" 
             :modal="true"   
             :draggable="false"
             :dismissable-mask="true"
-            class="w-full max-w-2xl mx-4"
+            :style="{ width: '100%', maxWidth: '550px' }" 
+            :breakpoints="{ '1199px': '75vw', '575px': '95vw' }"
+            class="mx-4 backdrop-blur-md"
         >
             <div v-if="selectedSource" class="flex flex-col gap-4 pt-2">
                 
-                <!-- Status Header -->
-                <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-gray-100 dark:border-gray-800">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-slate-800/60">
                     <div class="flex items-center gap-2">
-                        <p-message :severity="statusSeverityMap[selectedSource.status]" class="m-0 px-3 py-1 text-xs font-bold uppercase" icon="">
+                        <p-message :severity="statusSeverityMap[selectedSource.status]" class="m-0 px-3 py-1 text-xs font-bold uppercase shadow-inner" icon="">
                             {{ selectedSource.status }}
                         </p-message>
-                        <span class="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-gray-700 dark:text-gray-300">
+                        <span class="text-xs font-mono bg-slate-950/60 border border-slate-800/40 px-2 py-1 rounded text-slate-300">
                             {{ selectedSource.log_type }}
                         </span>
                     </div>
-                    <span class="text-xs font-mono text-gray-400">ID: {{ selectedSource.id }}</span>
+                    <span class="text-xs font-mono text-slate-400">ID: {{ selectedSource.id }}</span>
                 </div>
 
-                <!-- Source Information Grid -->
-                <div class="grid grid-cols-3 gap-y-3 gap-x-4 text-xs bg-gray-50 dark:bg-gray-900 p-4 rounded border border-gray-100 dark:border-gray-800">
-                    <div class="font-semibold text-gray-500 uppercase">File Path:</div>
-                    <div class="col-span-2 font-mono text-gray-700 dark:text-gray-300 break-all bg-white dark:bg-gray-800 p-1 px-2 rounded border border-gray-100 dark:border-gray-700">
+                <div class="grid grid-cols-3 gap-y-3 gap-x-4 text-xs bg-slate-900/40 p-4 rounded-xl border border-slate-800/60 backdrop-blur-sm shadow-sm">
+                    <div class="font-bold text-slate-400 uppercase tracking-widest flex items-center">File Path:</div>
+                    <div class="col-span-2 font-mono text-indigo-400 break-all bg-slate-950/60 p-2 rounded border border-slate-800/40 select-all">
                         {{ selectedSource.file_path }}
                     </div>
 
-                    <div class="font-semibold text-gray-500 uppercase">Registered:</div>
-                    <div class="col-span-2 font-mono">{{ new Date(selectedSource.created_at).toLocaleString() }}</div>
+                    <div class="font-bold text-slate-400 uppercase tracking-widest">Registered:</div>
+                    <div class="col-span-2 font-mono text-slate-200">{{ new Date(selectedSource.created_at).toLocaleString() }}</div>
 
-                    <div class="font-semibold text-gray-500 uppercase">Last Updated:</div>
-                    <div class="col-span-2 font-mono">{{ new Date(selectedSource.updated_at).toLocaleString() }}</div>
+                    <div class="font-bold text-slate-400 uppercase tracking-widest">Last Updated:</div>
+                    <div class="col-span-2 font-mono text-slate-200">{{ new Date(selectedSource.updated_at).toLocaleString() }}</div>
                 </div>
 
-                <!-- Description -->
-                <div class="flex flex-col gap-1">
-                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Description</span>
-                    <div class="text-sm p-3 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded shadow-sm italic text-gray-600">
+                <div class="space-y-1.5">
+                    <span class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">Description</span>
+                    <div class="text-sm p-3.5 bg-slate-950 border border-slate-800/60 rounded-xl leading-relaxed shadow-inner italic text-slate-300">
                         {{ selectedSource.description || 'No description provided for this log source.' }}
                     </div>
                 </div>
 
-                <!-- Actions Footer -->
-                <div class="flex justify-end gap-2 border-t pt-4 border-gray-100 dark:border-gray-800">
+                <div class="flex flex-col-reverse sm:flex-row justify-end gap-2.5 mt-2 pt-4 border-t border-slate-800/60 w-full">
                     <p-confirmpopup></p-confirmpopup>
                     <p-button label="Delete Source" severity="danger" text @click="confirmDelete($event,selectedSource.id)"></p-button>
-                    <!-- <p-button label="Delete Source" severity="danger" text @click=""></p-button> -->
                     <p-button label="Edit Configuration" icon="pi pi-pencil" severity="secondary" @click="isDialogVisible = false"></p-button>
                     <p-button label="Close" icon="pi pi-check" @click="isDialogVisible = false"></p-button>
                 </div>
@@ -84,85 +80,95 @@
             </div>
         </p-dialog>
 
-        <!-- Add Source Dialog -->
-        <p-dialog v-model:visible="isAddVisible" header="Register New Log Source" modal class="w-full max-w-lg mx-4">
+        <p-dialog v-model:visible="isAddVisible" header="Register New Log Source" modal :style="{ width: '100%', maxWidth: '550px' }" class="mx-4 backdrop-blur-md">
             <div class="flex flex-col gap-4 pt-2">
                 <p-fluid class="flex flex-col gap-4">
-                    <div class="flex flex-col gap-1">
-                        <label for="name" class="text-xs font-bold text-gray-500 uppercase">Source Name</label>
+                    <div class="space-y-1.5">
+                        <label for="name" class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">Source Name</label>
                         <p-inputtext id="name" v-model="form.name" placeholder="e.g. System Syslog" />
                     </div>
-                    <div class="flex flex-col gap-1">
-                        <label for="path" class="text-xs font-bold text-gray-500 uppercase">File Path</label>
+                    <div class="space-y-1.5">
+                        <label for="path" class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">File Path</label>
                         <p-inputtext id="path" v-model="form.file_path" placeholder="/var/log/syslog" />
                     </div>
-                    <div class="flex flex-col gap-1">
-                        <label for="type" class="text-xs font-bold text-gray-500 uppercase">Log Type</label>
+                    <div class="space-y-1.5">
+                        <label for="type" class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">Log Type</label>
                         <p-select id="type" v-model="form.log_type" :options="logTypeOptions" placeholder="Select Type" />
                     </div>
-                    <div class="flex flex-col gap-1">
-                        <label for="desc" class="text-xs font-bold text-gray-500 uppercase">Description</label>
+                    <div class="space-y-1.5">
+                        <label for="desc" class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">Description</label>
                         <p-textarea id="desc" v-model="form.description" rows="3" auto-resize placeholder="Describe this log source..." />
                     </div>
                 </p-fluid>
-                <div class="flex justify-end gap-2 border-t pt-4 mt-2">
+                <div class="flex justify-end gap-2.5 mt-2 pt-4 border-t border-slate-800/60 w-full">
                     <p-button label="Cancel" severity="secondary" text @click="isAddVisible = false"></p-button>
                     <p-button label="Create Source" icon="pi pi-plus" @click="handleAdd"></p-button>
                 </div>
             </div>
         </p-dialog>
 
-        <!-- Edit Status Dialog -->
-        <p-dialog v-model:visible="isEditVisible" :header="'Update Status — ' + selectedSource?.name" modal class="w-full max-w-sm mx-4">
+        <p-dialog v-model:visible="isEditVisible" :header="'Update Status — ' + selectedSource?.name" modal :style="{ width: '100%', maxWidth: '380px' }" class="mx-4 backdrop-blur-md">
             <div class="flex flex-col gap-4 pt-2">
-                <div class="bg-gray-50 dark:bg-gray-900 p-3 rounded border border-gray-100 dark:border-gray-800 text-xs">
-                    <span class="text-gray-500 font-semibold uppercase">Current Status: </span>
-                    <span class="font-mono font-bold uppercase" :class="selectedSource?.status === 'active' ? 'text-emerald-500' : 'text-amber-500'">{{ selectedSource?.status }}</span>
+                <div class="bg-slate-950/60 p-3 rounded-xl border border-slate-800/60 text-xs">
+                    <span class="text-slate-400 font-bold uppercase tracking-widest">Current Status: </span>
+                    <span class="font-mono font-bold uppercase ml-1" :class="selectedSource?.status === 'active' ? 'text-emerald-400' : 'text-amber-400'">{{ selectedSource?.status }}</span>
                 </div>
-                <p-fluid class="flex flex-col gap-1">
-                    <label class="text-xs font-bold text-gray-500 uppercase">New Status</label>
+                <p-fluid class="space-y-1.5">
+                    <label class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">New Status</label>
                     <p-select v-model="form.status" :options="statusOptions" placeholder="Choose Status" />
                 </p-fluid>
-                <div class="flex justify-end gap-2 border-t pt-4 mt-2">
+                <div class="flex justify-end gap-2.5 mt-2 pt-4 border-t border-slate-800/60 w-full">
                     <p-button label="Cancel" severity="secondary" text @click="isEditVisible = false"></p-button>
                     <p-button label="Save Changes" icon="pi pi-save" @click="handleEdit"></p-button>
                 </div>
             </div>
         </p-dialog>
         
-
-        <div id="main-parent">
-            <div class="topbar || mx-6 my-4 flex justify-between"> 
-                <div id="left">
-                    <h1 class="text-3xl font-bold cursor-pointer" @click="locReplace('/')">PUSINGBERAT</h1>
+        <div id="main-parent" class="w-full px-4 py-6 sm:px-6 lg:px-8 lg:h-full lg:flex lg:flex-col lg:gap-6 lg:box-border">
+            
+            <div class="topbar || flex flex-col md:flex-row items-center justify-between bg-slate-900/40 backdrop-blur-md p-4 lg:p-0 lg:px-6 rounded-2xl border border-slate-800/80 shadow-[0_8px_30px_rgb(0,0,0,0.3)] gap-4 w-full box-border flex-shrink-0"> 
+                <div id="left" class="flex flex-col sm:flex-row items-center gap-4 lg:gap-6 w-full md:w-auto">
+                    <div class="flex items-center">
+                        <span class="text-xl font-black tracking-tight text-slate-100 cursor-pointer select-none font-['Outfit',sans-serif]" @click="locReplace('/')">
+                            PUSING<span class="text-indigo-500 font-extrabold tracking-wide drop-shadow-[0_0_15px_rgba(99,102,241,0.3)]">BERAT</span>
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-1 bg-slate-950/40 border border-slate-800/60 p-1 rounded-xl w-full sm:w-auto justify-around sm:justify-start">
+                        <p-button label="alerts" variant="link" size='large' @click="locReplace('/alerts')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
+                        <p-button label="events" variant="link" size='large' @click="locReplace('/events')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
+                        <p-button label="rules" variant="link" size='large' @click="locReplace('/rules')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
+                        <p-button label="sources" variant="link" size='large' @click="locReplace('/logsources')" class="text-xs font-bold tracking-wide !text-indigo-400 bg-slate-800/40 px-3 py-1.5 rounded-lg"></p-button>
+                    </div>
                 </div>
 
-                <div id="right">
-                    <span><p-badge :value="totalRecords" severity="danger"></p-badge> Alerts today</span>
+                <div id="right" class="w-full md:w-auto flex justify-center md:justify-end">
+                    <div class="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-full py-1.5 px-3.5 text-xs text-rose-400 font-semibold shadow-[0_0_15px_rgba(244,63,94,0.05)]">
+                        <p-badge :value="totalRecords" severity="danger" class="animate-pulse shadow-sm"></p-badge> 
+                        <span class="tracking-wide">Alerts today</span>
+                    </div>
                 </div>
             </div>
 
+            <div class="sidebar hidden"> </div>
 
-            <div class="sidebar"> </div>
-
-
-            <div class="main-dashboard-content || w-full max-w-full ">
-                <div class="flex justify-between items-center mr-7">
-                    <h1 class="text-3xl font-bold my-5 mx-2">Log Sources</h1>
+            <div class="main-dashboard-content bg-slate-900/20 backdrop-blur-md rounded-2xl border border-slate-800/60 p-4 sm:p-5 flex flex-col justify-between w-full shadow-[0_12px_40px_rgba(0,0,0,0.2)] box-border flex-1 min-h-0 lg:overflow-hidden">
+                
+                <div class="flex items-center justify-between pb-4 border-b border-slate-800/40 flex-shrink-0">
+                    <div class="space-y-0.5">
+                        <h1 class="text-base font-bold text-slate-200 tracking-tight m-0">Log Sources</h1>
+                        <p class="text-xs text-slate-500">Ingestion listeners and filesystem stream targets</p>
+                    </div>
                     <div>
                         <p-button 
-                            icon="" 
-                            label="+ Add" 
+                            icon="pi pi-plus" 
+                            label="Add Source" 
                             @click="showAddDialog"
-                            class="p-button-md"
-                            rounded 
+                            class="p-button-sm text-xs font-bold px-4 py-1.5 rounded-xl shadow-md bg-indigo-600 hover:bg-indigo-500 border-none transition"
                         ></p-button>
                     </div>
                 </div>
                 
-                
-                <!-- DataTable Container -->
-                <div class="h-[calc(100vh-200px)] w-full">
+                <div class="w-full flex-1 min-h-0 mt-4 overflow-hidden rounded-xl border border-slate-800/80 shadow-sm bg-slate-950/20 flex flex-col">
                     <p-datatable 
                         :value="logSources" 
                         :loading="loading"
@@ -172,43 +178,49 @@
                         :total-records="totalRecords"
                         @page="onPage($event)"
                         scrollable 
-                        scroll-height="80%"
-                        class="w-full h-full"
+                        scroll-height="flex"
+                        class="w-full flex-1 flex flex-col justify-between overflow-hidden p-datatable-sm bg-transparent"
+                        :pt="{
+                            root: { class: 'flex flex-col flex-1 h-full min-h-0 overflow-hidden justify-between bg-transparent w-full' },
+                            wrapper: { class: 'flex-1 min-h-0 overflow-auto w-full' },
+                            table: { class: 'w-full' },
+                            paginator: { class: 'flex-shrink-0 border-t border-slate-800/60 bg-slate-950/40 w-full' }
+                        }"
                     >
-                        <p-column field="status" header="Status" class="w-1/6 min-w-[120px]">
+                        <p-column field="status" header="Status" style="width: 15%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
                             <template #body="slotProps">
-                                <p-message :severity="statusSeverityMap[slotProps.data.status]" class="justify-center m-0 uppercase text-xs font-bold">
+                                <p-message :severity="statusSeverityMap[slotProps.data.status]" class="justify-center m-0 uppercase text-[10px] font-bold tracking-wider rounded-lg shadow-inner py-1">
                                     {{ slotProps.data.status }}
                                 </p-message>    
                             </template>
                         </p-column>
                         
-                        <p-column field="name" header="Log Name" class="w-1/4 min-w-[250px]"></p-column>
+                        <p-column field="name" header="Log Name" style="width: 30%" class="font-semibold text-slate-200 tracking-tight text-sm" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider"></p-column>
                         
-                        <p-column field="file_path" header="Path" class="w-1/4 min-w-[200px]">
+                        <p-column field="file_path" header="Path" style="width: 30%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
                             <template #body="slotProps">
-                                <span class="font-mono text-xs truncate block max-w-[250px]">{{ slotProps.data.file_path }}</span>
+                                <span class="font-mono text-xs truncate block max-w-[320px] text-slate-400 select-all">{{ slotProps.data.file_path }}</span>
                             </template>
                         </p-column>
 
-                        <p-column field="log_type" header="Type" class="w-1/4 min-w-[150px]"></p-column>
+                        <p-column field="log_type" header="Type" style="width: 10%" class="font-semibold text-slate-300 font-mono text-xs" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider"></p-column>
                         
-                        <p-column header="Action" class="w-1/6 min-w-[180px]">
+                        <p-column header="Action" style="width: 15%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
                             <template #body="slotProps">
-                                <div class="flex justify-around">
+                                <div class="flex items-center gap-2">
                                     <p-button 
                                         icon="" 
                                         label="View" 
                                         @click="openSourceDetail(slotProps.data.id)" 
                                         severity="info"
-                                        class="p-button-sm " 
+                                        class="p-button-sm text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700/60 transition hover:bg-slate-800" 
                                     ></p-button>
                                     <p-button 
                                         icon="" 
                                         label="Edit" 
                                         severity="secondary"
                                         @click="showEditDialog(slotProps.data)"
-                                        class="p-button-sm" 
+                                        class="p-button-sm text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700/60 transition hover:bg-slate-800" 
                                     ></p-button>
                                 </div>
                             </template>
@@ -217,8 +229,6 @@
                 </div>
             </div>
 
-
-            
         </div>
     </div>
 
