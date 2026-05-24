@@ -25,6 +25,7 @@ def health():
 @app.get("/")
 def index():
     index_file = TEMPLATES_DIR / "index.html"
+    print(TEMPLATES_DIR)
     if index_file.exists():
         # return flask.re
         return send_from_directory(TEMPLATES_DIR, "index.html")

@@ -211,3 +211,30 @@ func (r *AlertRepo) MarkDiscordSent(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// GetSeverityCounts returns a map of severity levels to their respective alert counts.
+func (r *AlertRepo) GetSeverityCounts(ctx context.Context) (map[string]int64, error) {
+	query := `SELECT severity, COUNT(*) FROM alerts GROUP BY severity`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("alertRepo.GetSeverityCounts: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var severity string
+		var count int64
+		if err := rows.Scan(&severity, &count); err != nil {
+			return nil, fmt.Errorf("alertRepo.GetSeverityCounts scan: %w", err)
+		}
+		counts[severity] = count
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("alertRepo.GetSeverityCounts rows: %w", err)
+	}
+
+	return counts, nil
+}

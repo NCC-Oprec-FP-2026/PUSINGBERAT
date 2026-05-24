@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>PUSINGBERAT</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="shortcut icon" href="/static/img/ico_white.png" type="image/x-icon">
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/@vueuse/shared"></script>
+    <script src="https://unpkg.com/@vueuse/core"></script>
+
+    <script src="https://unpkg.com/primevue/umd/primevue.min.js"></script>
+    <script src="https://unpkg.com/@primeuix/themes/umd/aura.js"></script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+
+
+    <link rel="stylesheet" href="/statics/css/index/input_style.css">
+    <link rel="stylesheet" href="/statics/css/index/style.css">
+</head>
+<body class="font-[outfit]">
+    <div id="app">
+
+        <!-- The Dialog Overlay -->
+        <p-dialog 
+            v-model:visible="open_select_alert_overlay" 
+            maximizable 
+            modal 
+            :header="'Alert Details: ' + selected_alert?.rule_name" 
+            :style="{ width: '50rem' }" 
+            :breakpoints="{ '1199px': '75vw', '575px': '90vw' }"
+        >
+            <!-- Check if an alert is currently selected to avoid null template errors -->
+            <div v-if="selected_alert" class="flex flex-col gap-4">
+                
+                <!-- Severity Card Indicator -->
+                <div class="flex justify-between items-center bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <div>
+                        <span class="text-xs text-slate-500 block uppercase font-bold tracking-wider">Incident Title</span>
+                        <span class="text-lg font-semibold text-slate-800">{{ selected_alert.title }}</span>
+                    </div>
+                    <p-message :severity="alert_severity_map[selected_alert.severity.toUpperCase()]" icon="">
+                        {{ selected_alert.severity.toUpperCase() }}
+                    </p-message>
+                </div>
+
+                <!-- Description Meta Block -->
+                <div>
+                    <span class="text-xs text-slate-500 block uppercase font-bold tracking-wider mb-1">Description</span>
+                    <p class="m-0 text-slate-700 leading-relaxed bg-white border border-slate-100 p-3 rounded shadow-inner">
+                        {{ selected_alert.description }}
+                    </p>
+                </div>
+
+                <!-- Incident Metadata Grid Layout -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-slate-50 p-3 rounded border border-slate-100">
+                        <span class="text-xs text-slate-400 block font-semibold">TRIGGERED TIME</span>
+                        <span class="text-sm font-mono text-slate-700">{{ useTimeAgo(new Date(selected_alert.triggered_at)) }}</span>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded border border-slate-100">
+                        <span class="text-xs text-slate-400 block font-semibold">STATUS</span>
+                        <p-badge :value="selected_alert.acknowledged ? 'Acknowledged' : 'New Incident'" :severity="selected_alert.acknowledged ? 'success' : 'danger'"></p-badge>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded border border-slate-100 col-span-2">
+                        <span class="text-xs text-slate-400 block font-semibold">INCIDENT ID (UUID)</span>
+                        <span class="text-xs font-mono text-slate-600 block truncate">{{ selected_alert.id }}</span>
+                    </div>
+                </div>
+
+                <!-- Raw Log Console Stream -->
+                <div>
+                    <span class="text-xs text-slate-500 block uppercase font-bold tracking-wider mb-1">Raw Log Entry Payload</span>
+                    <pre class="m-0 p-4 bg-slate-900 text-emerald-400 font-mono text-xs rounded-lg overflow-x-auto whitespace-pre-wrap shadow-md border-l-4 border-emerald-500">{{ selected_alert.raw_line }}</pre>
+                </div>
+                
+                <div class="flex justify-end gap-2">
+                    <p-confirmpopup></p-confirmpopup>
+                    <p-button type="button" label="Delete" severity="danger" @click="confirmDelete($event,selected_alert.id)"></p-button>
+                    <p-button type="button" label="Acknowledge" :disabled="selected_alert.acknowledged" @click="api.patch(`/alerts/${selected_alert.id}/acknowledge`).then(() => fetchAlerts()).then(() => open_select_alert_overlay = false)"></p-button>
+                </div>
+            </div>
+        </p-dialog>
+
+        <div id="main-parent">
+            <div class="topbar || mx-6 my-4 flex justify-between  "> 
+                <div id="left" class="flex items-center-safe">
+                    <div class="flex items-center mx-3">
+                        <span class="text-3xl font-bold cursor-pointer items-center" @click="locReplace('/')">PUSINGBERAT</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <p-button label="alerts" variant="link" size='large' @click="locReplace('/alerts')"></p-button>
+                        <p-button label="events" variant="link" size='large' @click="locReplace('/events')"></p-button>
+                        <p-button label="rules" variant="link" size='large' @click="locReplace('/rules')"></p-button>
+                        <p-button label="sources" variant="link" size='large' @click="locReplace('/logsources')"></p-button>
+                    </div>
+                </div>
+
+                <div id="right">
+                    <span><p-badge :value="totalRecords" severity="danger"></p-badge> Alerts today</span>
+                </div>
+            </div>
+            <div class="important_metrics || flex justify-around h-48 " > 
+                <p-card class="w-1/5">
+                    <template #title>Total Events</template>
+                    <template #content>
+                        <span class="text-6xl font-bold">{{total_events}}</span>
+                    </template>
+                </p-card>
+
+                <p-card class="w-1/5">
+                    <template #title>Critical Alerts</template>
+                    <template #content>
+                        <span class="text-6xl font-bold">{{critical_events}}</span>
+                    </template>
+                </p-card>
+
+                <p-card class="w-1/5">
+                    <template #title>Active Sources</template>
+                    <template #content>
+                        <span class="text-6xl font-bold">{{active_sources}}</span>
+                    </template>
+                </p-card>
+
+                <p-card class="w-1/5">
+                    <template #title>Log Resources</template>
+                    <template #content>
+                        <span class="text-6xl font-bold">{{active_sources > 0 ? "OK" :"NOT OK  "}}</span>
+                    </template>
+                </p-card>
+
+            </div>
+
+            <div class="severity_donut || h-full flex justify-center items-center "> 
+                <div style="width: 80%; height: 80%; margin: 0 auto;">
+                    <canvas id="donutChart" ref="donutCanvas" style="width:100%;height:100%;"></canvas>
+                </div>
+            </div>
+            <div class="event_timeline || h-full "> 
+                <div style="width: 80%; height: 80%; margin: 0 auto;">
+                    <canvas id="lineCanvas" ref="lineCanvas" style="width:100%;height:100%;"></canvas>
+                </div>
+            </div>
+
+            <div class="recent_alert w-full" style="min-height: 0 !important; overflow: hidden !important; height: 100%;"> 
+                
+                <!-- 2. PrimeVue's dynamic internal wrapper will now lock perfectly into place -->
+                <p-datatable 
+                    :value="recent_alerts" 
+                    :loading="loading" 
+                    scrollable 
+                    scroll-height="100%"
+                    tableStyle="min-width: 50rem"
+                    class="h-full"
+                >
+                    <p-column field="severity" header="Severity" style="width: 25%">
+                        <template #body="slotProps">
+                            <p-message :severity="alert_severity_map[slotProps.data.severity]" class="justify-center">
+                                {{slotProps.data.severity}}
+                            </p-message>
+                        </template>
+                    </p-column>
+                    <p-column field="title" header="Title" style="width: 25%">
+                    </p-column>
+                    <p-column field="triggered_at" header="Time" style="width: 25%">
+                        <template #body="slotProps">
+                            {{useTimeAgo(new Date(slotProps.data.time))}}
+                        </template>
+                    </p-column>
+                    <p-column field="status" header="Status" style="width: 25%"></p-column>
+                    <p-column field="" header="Action" style="width: 25%">
+                        <template #body="slotProps">
+                            <p-button 
+                                icon="" 
+                                label="View" 
+                                @click="openAlert(slotProps.data.id)" 
+                                class="p-button-sm" 
+                            />
+                            
+                        </template>
+                    </p-column>
+                </p-datatable>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // API things
+
+        const BASE_URL = 'http://localhost:8080/api/v1';
+        
+
+        const api = {
+            async get(endpoint) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+            async post(endpoint, data = {}) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (POST ${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+
+            // 2. PATCH Method - For updating existing resources partially (Fixed your bug here)
+            async patch(endpoint, data = {}) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (PATCH ${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+
+            // 3. DELETE Method - For removing resources
+            async delete(endpoint) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`, {
+                        method: 'DELETE'
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    
+                    // Handle cases where DELETE returns No Content (204) instead of JSON
+                    if (response.status === 204) return { success: true };
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (DELETE ${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+    
+            endpoints: {
+                severity_count : '/alerts/severitycount',
+                stats: '/stats/overview',
+                alerts: '/alerts',
+                events: '/events',
+                sources: '/sources'
+            }
+        };
+
+    </script>
+
+
+    <script>
+
+    </script>
+
+    <script>
+    const { createApp, ref, onMounted } = Vue;
+    const { useTimeAgo } = VueUse;
+
+    const app = createApp({
+    setup() {
+
+
+        // dashboard data
+        
+        const total_events = ref(0);
+        const critical_events = ref(0);
+        const active_sources = ref(0);
+        const recent_alerts = ref([]);
+        const loading = ref(false);
+        const total_alerts = ref(0);
+
+        const open_select_alert_overlay = ref(false)
+        const selected_alert = ref({})
+        // const selected_alert = ref(true)
+
+
+        const severity_count = ref([0, 0, 0, 0, 0]);
+
+
+        const donut_data = ref({
+            labels: ['Critical', 'High', 'Medium', 'Low', 'Info'],
+            datasets: [{
+                data: [0, 0, 0, 0, 0],
+                backgroundColor: ['#EF4444', '#F97316', '#EAB308', '#3B82F6', '#6B7280']
+            }]
+        });
+
+        const line_data = ref({
+            labels: ["12am", "4am", "8am", "12pm", "4pm", "8pm"],
+            datasets: [{
+                label: "Events",
+                data: [65, 59, 80, 81, 56, 55],
+                fill: false,
+                borderColor: 'rgb(75, 192, 192)',
+                tension: 0.1
+            }]
+        });
+
+        // Store chart instances so we can update them dynamically
+        let donutChartInstance = null;
+        let lineChartInstance = null;
+
+        function locReplace(target) {
+            window.location.replace(target);
+        }
+
+        
+        const confirm = PrimeVue.useConfirm();
+        const confirmDelete = (event, id) => {
+            confirm.require({
+                message: 'Are you sure you want to delete this alert?',
+                header: 'Confirm deletion',
+                icon: '',
+                rejectProps: {
+                    label: 'Cancel',
+                    severity: 'secondary',
+                    outlined: true
+                },
+                acceptProps: {
+                    label: 'Delete',
+                    severity: 'danger'
+                },
+                accept: () => {
+                    api.delete(`/alerts/${id}`).then(() => fetchAlerts()).then(() => open_select_alert_overlay.value = false)
+                },
+                reject: () => {
+                    
+                }
+            });
+        };
+
+        async function openAlert(id) {
+            console.log(id)
+            res = await api.get(`/alerts/${id}`);
+            console.log(res)
+            selected_alert.value =res.data ; 
+            open_select_alert_overlay.value = true;
+        }
+
+        async function fetchAlerts() {
+            loading.value = true
+            const alertsRes = await api.get(api.endpoints.alerts);
+            if (alertsRes.data) {
+                recent_alerts.value = alertsRes.data.map(alert => ({
+                    ...alert,
+                    severity: alert.severity.toUpperCase(),
+                    title: alert.rule_name,
+                    time: alert.triggered_at,
+                    status: alert.acknowledged ? 'ACKed' : 'NEW'
+                }));
+                
+                total_alerts.value = alertsRes.data.length;
+                critical_events.value = alertsRes.data.filter(a => a.severity === 'critical').length;
+            }
+
+            loading.value = false
+        }
+
+        const fetchDashboardData = async () => {
+            loading.value = true;
+            
+            // Fetch Alerts
+            const alertsRes = await api.get(api.endpoints.alerts);
+            if (alertsRes.data) {
+                recent_alerts.value = alertsRes.data.map(alert => ({
+                    ...alert,
+                    severity: alert.severity.toUpperCase(),
+                    title: alert.rule_name,
+                    time: alert.triggered_at,
+                    status: alert.acknowledged ? 'ACKed' : 'NEW'
+                }));
+                
+                total_alerts.value = alertsRes.data.length;
+                critical_events.value = alertsRes.data.filter(a => a.severity === 'critical').length;
+            }
+
+            // Fetch Sources
+            const sourcesRes = await api.get(api.endpoints.sources);
+            if (sourcesRes.data) {
+                active_sources.value = sourcesRes.data.filter(s => s.status === 'active').length;
+            }
+
+            // Fetch Events (Total)
+            const eventsRes = await api.get(api.endpoints.events);
+            if (eventsRes.data) {
+                total_events.value = eventsRes.meta?.total || eventsRes.data.length;
+            }
+
+            const sevCountRes = await api.get(api.endpoints.severity_count);
+            if (sevCountRes.data) {
+                const counts = sevCountRes.data;
+                // Explicitly map keys to ensure the order matches the labels array
+                const sortedData = [
+                    counts.critical || 0,
+                    counts.high || 0,
+                    counts.medium || 0,
+                    counts.low || 0,
+                    counts.info || 0
+                ];
+                
+                severity_count.value = sortedData;
+                donut_data.value.datasets[0].data = sortedData;
+
+                if (donutChartInstance) {
+                    donutChartInstance.update();
+                }
+            }
+
+            loading.value = false;
+        };
+
+
+
+        const alert_severity_map = {
+            'CRITICAL' : 'error',
+            'HIGH' : 'warn',
+            'MEDIUM' : 'info',
+            'LOW' : 'secondary',
+            'INFO' : 'secondary'
+        }
+
+
+
+        // const line_data = ref({
+        //     labels: ["Jan",'Feb','Mar','Apr','May','Jun','Jul'],
+        //     datasets: [{
+        //         label: 'My First Dataset',
+        //         data: [65, 59, 80, 81, 56, 55, 40],
+        //         fill: false,
+        //         borderColor: 'rgb(75, 192, 192)',
+        //         tension: 0.1
+        //     }]
+        // })
+
+        const donutCanvas = ref(null);
+        const lineCanvas = ref(null);
+
+        onMounted(async () => {
+            await fetchDashboardData()
+
+
+            const donutcanvas = donutCanvas.value;
+            const ctx = donutcanvas && donutcanvas.getContext ? donutcanvas.getContext('2d') : null;
+            if (!ctx) return;
+            donutChartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: donut_data.value,
+                options: {
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+
+            const linecanvas = lineCanvas.value;
+            const ctx_2 = linecanvas && linecanvas.getContext ? linecanvas.getContext('2d') : null;
+            if (!ctx_2) return;
+            lineChartInstance = new Chart(ctx_2, {
+                type: 'line',
+                data: line_data.value,
+            });
+        });
+
+        return {
+
+
+            total_events,
+            critical_events,
+            active_sources,
+
+            open_select_alert_overlay,
+            selected_alert,
+
+            donut_data,
+            donutCanvas,
+            lineCanvas,
+            alert_severity_map,
+            recent_alerts,
+
+            //fn
+            api,    
+            confirmDelete,
+            useTimeAgo,
+            openAlert,
+            fetchAlerts
+
+        }
+
+    }
+    })
+
+
+    app.use(PrimeVue.Config, {
+        theme: {
+            preset: PrimeUIX.Themes.Aura
+        }
+    });
+
+
+    app.component('p-chip', PrimeVue.Chip);
+    app.component('p-badge', PrimeVue.Badge);
+    app.component('p-card', PrimeVue.Card);
+    app.component('p-datatable', PrimeVue.DataTable);
+    app.component('p-column', PrimeVue.Column);
+    app.component('p-message', PrimeVue.Message);
+    app.component('p-dialog', PrimeVue.Dialog);
+    app.component('p-button', PrimeVue.Button);
+
+    app.component('p-confirmpopup', PrimeVue.ConfirmPopup);
+    app.use(PrimeVue.ConfirmationService);
+
+    app.mount('#app');
+    </script>
+</body>
+</html>
