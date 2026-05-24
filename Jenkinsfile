@@ -6,7 +6,7 @@
 // Job type: Pipeline (bukan Multibranch Pipeline).
 // Karena itu BRANCH_NAME tidak tersedia secara otomatis.
 // Gantinya kita gunakan GIT_BRANCH (diisi oleh Git plugin)
-// yang nilainya berformat "origin/feature/day5-discord-merged".
+// yang nilainya berformat "origin/feature/integrate-be-day7-azaregon".
 //
 // Stages:
 //   1. Checkout        — clone source dari GitHub
@@ -46,8 +46,8 @@ pipeline {
         IMAGE_TAG     = "${env.GIT_COMMIT?.take(7) ?: 'latest'}"
         COVERAGE_FILE = 'backend/coverage.out'
 
-        // GIT_BRANCH diisi Git plugin: "origin/feature/day5-discord-merged"
-        // Kita normalisasi jadi "feature/day5-discord-merged" untuk perbandingan.
+        // GIT_BRANCH diisi Git plugin: "origin/feature/integrate-be-day7-azaregon"
+        // Kita normalisasi jadi "feature/integrate-be-day7-azaregon" untuk perbandingan.
         BRANCH_CLEAN  = "${env.GIT_BRANCH?.replaceFirst('origin/', '') ?: 'unknown'}"
     }
 
@@ -77,7 +77,7 @@ pipeline {
             when {
                 expression {
                     def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
-                    return b in ['develop', 'main', 'feature/day5-discord-merged']
+                    return b in ['develop', 'main', 'feature/integrate-be-day7-azaregon']
                 }
             }
             steps {
@@ -102,7 +102,7 @@ pipeline {
             when {
                 expression {
                     def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
-                    return b in ['develop', 'main', 'feature/day5-discord-merged']
+                    return b in ['develop', 'main', 'feature/integrate-be-day7-azaregon']
                 }
             }
             steps {
@@ -141,7 +141,7 @@ pipeline {
             when {
                 expression {
                     def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
-                    return b in ['develop', 'main', 'feature/day5-discord-merged']
+                    return b in ['develop', 'main', 'feature/integrate-be-day7-azaregon']
                 }
             }
             steps {
@@ -170,7 +170,7 @@ pipeline {
             when {
                 expression {
                     def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
-                    return b in ['develop', 'main', 'feature/day5-discord-merged']
+                    return b in ['develop', 'main', 'feature/integrate-be-day7-azaregon']
                 }
             }
             steps {
@@ -190,7 +190,7 @@ pipeline {
             when {
                 expression {
                     def b = env.GIT_BRANCH?.replaceFirst('origin/', '')
-                    return b in ['develop', 'main', 'feature/day5-discord-merged']
+                    return b in ['develop', 'main', 'feature/integrate-be-day7-azaregon']
                 }
             }
             steps {
