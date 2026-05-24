@@ -110,7 +110,7 @@ func (s *EventService) GetTopSources(ctx context.Context) ([]repository.TopSourc
 //
 // This is called once from main.go after DI wiring is complete.
 func (s *EventService) StartPersistenceWorker(
-	ctx context.Context, 
+	ctx context.Context,
 	eventChan <-chan *domain.ParsedEvent,
 	engine *ruleengine.Engine,
 	resolveLogType func(uuid.UUID) string,

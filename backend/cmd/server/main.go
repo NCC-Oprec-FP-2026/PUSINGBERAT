@@ -75,7 +75,7 @@ func main() {
 
 	// Services
 	logSourceSvc := service.NewLogSourceService(logSourceRepo)
-	eventSvc := service.NewEventService(eventRepo)
+	eventSvc := service.NewEventService(eventRepo, nil, nil)
 	ruleSvc := service.NewRuleService(ruleRepo)
 	alertSvc := service.NewAlertService(alertRepo)
 
