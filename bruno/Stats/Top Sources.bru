@@ -1,0 +1,16 @@
+meta {
+  name: Top Sources
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{base_url}}/api/v1/stats/top-sources
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isDefined
+}
