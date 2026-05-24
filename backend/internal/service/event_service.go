@@ -3,9 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
+
+	"github.com/google/uuid"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/ruleengine"
 )
 
 // ---------------------------------------------------------------------------
@@ -16,14 +20,18 @@ import (
 type EventRepository interface {
 	Create(ctx context.Context, ev *domain.ParsedEvent) error
 	GetByID(ctx context.Context, id int64) (*domain.ParsedEvent, error)
-	List(ctx context.Context, params repository.EventListParams) ([]domain.ParsedEvent, int64, error)
+	ListEvents(ctx context.Context, params repository.EventFilterParams) ([]domain.ParsedEvent, int64, error)
+	GetStatsOverview(ctx context.Context) (*repository.StatsOverview, error)
+	GetEventsTimeline(ctx context.Context) ([]repository.TimelinePoint, error)
+	GetTopSources(ctx context.Context) ([]repository.TopSource, error)
 }
 
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
-// EventService orchestrates ParsedEvent operations.
+// EventService orchestrates ParsedEvent operations and hosts the background
+// persistence goroutine that drains the watcher pipeline's event channel.
 type EventService struct {
 	repo EventRepository
 }
@@ -51,11 +59,99 @@ func (s *EventService) GetByID(ctx context.Context, id int64) (*domain.ParsedEve
 	return ev, nil
 }
 
-// List returns paginated events.
-func (s *EventService) List(ctx context.Context, params repository.EventListParams) ([]domain.ParsedEvent, int64, error) {
-	events, total, err := s.repo.List(ctx, params)
+// ListEvents returns filtered + paginated events.
+func (s *EventService) ListEvents(ctx context.Context, params repository.EventFilterParams) ([]domain.ParsedEvent, int64, error) {
+	events, total, err := s.repo.ListEvents(ctx, params)
 	if err != nil {
-		return nil, 0, fmt.Errorf("eventService.List: %w", err)
+		return nil, 0, fmt.Errorf("eventService.ListEvents: %w", err)
 	}
 	return events, total, nil
+}
+
+// GetStatsOverview returns the four dashboard stat-card counters.
+func (s *EventService) GetStatsOverview(ctx context.Context) (*repository.StatsOverview, error) {
+	return s.repo.GetStatsOverview(ctx)
+}
+
+// GetEventsTimeline returns hourly event counts for the last 24 hours.
+func (s *EventService) GetEventsTimeline(ctx context.Context) ([]repository.TimelinePoint, error) {
+	return s.repo.GetEventsTimeline(ctx)
+}
+
+// GetTopSources returns the top 5 log sources by event count.
+func (s *EventService) GetTopSources(ctx context.Context) ([]repository.TopSource, error) {
+	return s.repo.GetTopSources(ctx)
+}
+
+// ---------------------------------------------------------------------------
+// Background persistence goroutine
+// ---------------------------------------------------------------------------
+
+// StartPersistenceWorker launches a background goroutine that reads parsed
+// events from the provided channel and persists them to the database via
+// EventRepository.Create.
+//
+// The goroutine runs until ctx is cancelled or eventChan is closed. Parse
+// or DB errors are logged but never crash the worker — one bad event must
+// not stop the pipeline.
+//
+// This is called once from main.go after DI wiring is complete.
+func (s *EventService) StartPersistenceWorker(
+	ctx context.Context, 
+	eventChan <-chan *domain.ParsedEvent,
+	engine *ruleengine.Engine,
+	resolveLogType func(uuid.UUID) string,
+) {
+	go func() {
+		slog.Info("event persistence worker started")
+		var saved, dropped int64
+
+		for {
+			select {
+			case <-ctx.Done():
+				slog.Info("event persistence worker stopping",
+					"saved", saved,
+					"dropped", dropped,
+				)
+				return
+
+			case ev, ok := <-eventChan:
+				if !ok {
+					slog.Info("event persistence worker: channel closed",
+						"saved", saved,
+						"dropped", dropped,
+					)
+					return
+				}
+
+				if err := s.repo.Create(ctx, ev); err != nil {
+					dropped++
+					slog.Error("event persistence worker: save failed",
+						"source_id", ev.LogSourceID,
+						"err", err,
+					)
+					continue
+				}
+				saved++
+
+				// Resolve log_type
+				logType := ""
+				if resolveLogType != nil {
+					logType = resolveLogType(ev.LogSourceID)
+				}
+
+				// Forward to Rule Engine
+				if engine != nil {
+					engine.Evaluate(ev, logType)
+				}
+
+				if saved%100 == 0 {
+					slog.Debug("event persistence worker progress",
+						"saved", saved,
+						"dropped", dropped,
+					)
+				}
+			}
+		}
+	}()
 }

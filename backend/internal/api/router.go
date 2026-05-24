@@ -9,6 +9,7 @@ import (
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/api/handler"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/api/middleware"
+	ws "github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/websocket"
 )
 
 // RouterDeps bundles all handler instances that the router needs.
@@ -19,9 +20,13 @@ type RouterDeps struct {
 	Event     *handler.EventHandler
 	Rule      *handler.RuleHandler
 	Alert     *handler.AlertHandler
+	Stats     *handler.StatsHandler
 
 	// Pool is kept so the health endpoint can run a DB ping check.
 	Pool *pgxpool.Pool
+
+	// WSHub is the WebSocket hub for real-time alert broadcasting.
+	WSHub *ws.Hub
 
 	// CORSOrigins is a list of allowed frontend origins for the CORS
 	// middleware (read from CORS_ALLOWED_ORIGINS env var).
@@ -85,14 +90,23 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 			alerts.DELETE("/:id", deps.Alert.Delete)
 		}
 
-		// Stats — placeholder for Part 3+ / Day 3.
-		// stats := v1.Group("/stats")
-		// {
-		//     stats.GET("/overview", deps.Stats.Overview)
-		//     stats.GET("/events/timeline", deps.Stats.EventsTimeline)
-		//     stats.GET("/alerts/by-severity", deps.Stats.AlertsBySeverity)
-		//     stats.GET("/top-sources", deps.Stats.TopSources)
-		// }
+		// Stats — dashboard dashboard endpoint routes.
+		stats := v1.Group("/stats")
+		{
+			stats.GET("/overview", deps.Stats.Overview)
+			stats.GET("/events/timeline", deps.Stats.EventsTimeline)
+			stats.GET("/alerts/by-severity", deps.Stats.AlertsBySeverity)
+			stats.GET("/top-sources", deps.Stats.TopSources)
+		}
+	}
+
+	// ---------------------------------------------------------------
+	// WebSocket endpoint — real-time alert streaming.
+	// ---------------------------------------------------------------
+	if deps.WSHub != nil {
+		router.GET("/ws", func(c *gin.Context) {
+			ws.ServeWS(deps.WSHub, c.Writer, c.Request)
+		})
 	}
 
 	// Catch-all: clean JSON 404 for unregistered routes.
