@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
@@ -30,28 +31,23 @@ func TestLogLineCreatesAlert(t *testing.T) {
 
 	logSourceRepo := repository.NewLogSourceRepo(db)
 	eventRepo := repository.NewEventRepo(db)
-	ruleRepo := repository.NewRuleRepo(db)
 	alertRepo := repository.NewAlertRepo(db)
 
-	if err := ruleengine.SeedRules(ctx, ruleRepo, "../../rules"); err != nil {
-		t.Fatalf("seed rules: %v", err)
-	}
-	rules, err := ruleengine.LoadEnabledRulesFromDB(ctx, ruleRepo)
-	if err != nil {
+	loader := ruleengine.NewRuleLoader()
+	if err := loader.LoadFromDirectory("../../rules"); err != nil {
 		t.Fatalf("load rules: %v", err)
 	}
 
-	alertChan := make(chan domain.Alert, 10)
-	alertService := service.NewAlertService(alertRepo)
-	dispatcher := ruleengine.NewAlertDispatcher(alertChan, alertService, nil)
-	dispatcherCtx, stopDispatcher := context.WithCancel(ctx)
-	defer stopDispatcher()
-	go dispatcher.Run(dispatcherCtx)
+	alertChan := ruleengine.NewAlertChan()
+	dispatcher := service.NewAlertDispatcher(alertRepo, alertChan, nil, service.NewDiscordNotifier(""))
+	dispatcher.Start(ctx)
 
-	engine := ruleengine.NewEngine(rules)
-	eventService := service.NewEventService(eventRepo, engine, alertChan)
-	registry := watcher.NewRegistry(ctx)
-	eventService.StartPersistenceWorker(ctx, registry.EventChan())
+	engine := ruleengine.NewEngine(loader, alertChan)
+	eventService := service.NewEventService(eventRepo, nil, nil)
+	registry := watcher.NewRegistry(ctx, nil)
+	eventService.StartPersistenceWorker(ctx, registry.EventChan(), engine, func(uuid.UUID) string {
+		return "syslog"
+	})
 	sourceService := service.NewLogSourceService(logSourceRepo)
 	sourceService.SetRegistry(registry)
 
@@ -76,6 +72,8 @@ func TestLogLineCreatesAlert(t *testing.T) {
 		registry.RemoveWatcher(source.ID)
 		_ = logSourceRepo.Delete(context.Background(), source.ID)
 	}()
+
+	time.Sleep(100 * time.Millisecond)
 
 	line := fmt.Sprintf(
 		"%s integration-host login[4321]: pam_unix(login:auth): authentication failure; user=root",
