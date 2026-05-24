@@ -20,7 +20,10 @@ import (
 type EventRepository interface {
 	Create(ctx context.Context, ev *domain.ParsedEvent) error
 	GetByID(ctx context.Context, id int64) (*domain.ParsedEvent, error)
-	List(ctx context.Context, params repository.EventListParams) ([]domain.ParsedEvent, int64, error)
+	ListEvents(ctx context.Context, params repository.EventFilterParams) ([]domain.ParsedEvent, int64, error)
+	GetStatsOverview(ctx context.Context) (*repository.StatsOverview, error)
+	GetEventsTimeline(ctx context.Context) ([]repository.TimelinePoint, error)
+	GetTopSources(ctx context.Context) ([]repository.TopSource, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -56,13 +59,28 @@ func (s *EventService) GetByID(ctx context.Context, id int64) (*domain.ParsedEve
 	return ev, nil
 }
 
-// List returns paginated events.
-func (s *EventService) List(ctx context.Context, params repository.EventListParams) ([]domain.ParsedEvent, int64, error) {
-	events, total, err := s.repo.List(ctx, params)
+// ListEvents returns filtered + paginated events.
+func (s *EventService) ListEvents(ctx context.Context, params repository.EventFilterParams) ([]domain.ParsedEvent, int64, error) {
+	events, total, err := s.repo.ListEvents(ctx, params)
 	if err != nil {
-		return nil, 0, fmt.Errorf("eventService.List: %w", err)
+		return nil, 0, fmt.Errorf("eventService.ListEvents: %w", err)
 	}
 	return events, total, nil
+}
+
+// GetStatsOverview returns the four dashboard stat-card counters.
+func (s *EventService) GetStatsOverview(ctx context.Context) (*repository.StatsOverview, error) {
+	return s.repo.GetStatsOverview(ctx)
+}
+
+// GetEventsTimeline returns hourly event counts for the last 24 hours.
+func (s *EventService) GetEventsTimeline(ctx context.Context) ([]repository.TimelinePoint, error) {
+	return s.repo.GetEventsTimeline(ctx)
+}
+
+// GetTopSources returns the top 5 log sources by event count.
+func (s *EventService) GetTopSources(ctx context.Context) ([]repository.TopSource, error) {
+	return s.repo.GetTopSources(ctx)
 }
 
 // ---------------------------------------------------------------------------

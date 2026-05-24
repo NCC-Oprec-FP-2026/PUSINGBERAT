@@ -1,5 +1,11 @@
-// --- internal/service/alert_dispatcher.go ---
-
+// Package service — alert_dispatcher.go is the central alert pipeline
+// goroutine. It reads alerts from the rule engine's channel and
+// sequentially:
+//   1. Persists the alert to PostgreSQL.
+//   2. Broadcasts the alert to all WebSocket clients.
+//   3. Sends the alert to Discord (with retry).
+//
+// Architecture: Section 7.1 (Real-Time Alert Flow)
 package service
 
 import (
@@ -7,22 +13,31 @@ import (
 	"log/slog"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
+	ws "github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/websocket"
 )
 
-// AlertDispatcher reads alerts from a channel and persists them to the
-// database. Future sprints will add WebSocket broadcasting and Discord
-// webhook delivery here.
+// AlertDispatcher reads alerts from a channel and fans them out to the
+// database, WebSocket hub, and Discord webhook.
 type AlertDispatcher struct {
-	repo      AlertRepository
+	repo     AlertRepository
 	alertChan <-chan *domain.Alert
+	wsHub    *ws.Hub
+	discord  *DiscordNotifier
 }
 
-// NewAlertDispatcher creates a dispatcher that reads from the given channel
-// and writes alerts using the provided repository.
-func NewAlertDispatcher(repo AlertRepository, alertChan <-chan *domain.Alert) *AlertDispatcher {
+// NewAlertDispatcher creates a dispatcher wired to all three output sinks.
+// wsHub and discord may be nil — the dispatcher gracefully skips them.
+func NewAlertDispatcher(
+	repo AlertRepository,
+	alertChan <-chan *domain.Alert,
+	wsHub *ws.Hub,
+	discord *DiscordNotifier,
+) *AlertDispatcher {
 	return &AlertDispatcher{
 		repo:      repo,
 		alertChan: alertChan,
+		wsHub:     wsHub,
+		discord:   discord,
 	}
 }
 
@@ -31,8 +46,11 @@ func NewAlertDispatcher(repo AlertRepository, alertChan <-chan *domain.Alert) *A
 // Called once from main.go after DI wiring is complete.
 func (d *AlertDispatcher) Start(ctx context.Context) {
 	go func() {
-		slog.Info("alert dispatcher started")
-		var saved, dropped int64
+		slog.Info("alert dispatcher started",
+			"websocket", d.wsHub != nil,
+			"discord", d.discord != nil && d.discord.Enabled(),
+		)
+		var saved, dropped, wsBroadcast, discordOK, discordFail int64
 
 		for {
 			select {
@@ -40,6 +58,9 @@ func (d *AlertDispatcher) Start(ctx context.Context) {
 				slog.Info("alert dispatcher stopping",
 					"saved", saved,
 					"dropped", dropped,
+					"ws_broadcast", wsBroadcast,
+					"discord_ok", discordOK,
+					"discord_fail", discordFail,
 				)
 				return
 
@@ -52,6 +73,9 @@ func (d *AlertDispatcher) Start(ctx context.Context) {
 					return
 				}
 
+				// -------------------------------------------------------
+				// Step 1: Persist to PostgreSQL
+				// -------------------------------------------------------
 				if err := d.repo.Create(ctx, alert); err != nil {
 					dropped++
 					slog.Error("alert dispatcher: failed to persist alert",
@@ -70,18 +94,50 @@ func (d *AlertDispatcher) Start(ctx context.Context) {
 					"title", alert.Title,
 				)
 
-				// TODO (Day 5+): WebSocket broadcast
-				// wsHub.Broadcast(alertJSON)
-				slog.Debug("alert dispatcher: WebSocket broadcast not wired yet")
+				// -------------------------------------------------------
+				// Step 2: WebSocket broadcast (Section 11.2/11.3)
+				// -------------------------------------------------------
+				if d.wsHub != nil {
+					msg := ws.NewWSMessage("alert", alert)
+					d.wsHub.Broadcast(msg)
+					wsBroadcast++
+					slog.Debug("alert dispatcher: WebSocket broadcast sent",
+						"alert_id", alert.ID,
+						"ws_clients", d.wsHub.ClientCount(),
+					)
+				}
 
-				// TODO (Day 5+): Discord webhook notification
-				// discord.Send(alert)
-				slog.Debug("alert dispatcher: Discord notification not wired yet")
+				// -------------------------------------------------------
+				// Step 3: Discord webhook (Section 7.3/7.4)
+				// -------------------------------------------------------
+				if d.discord != nil && d.discord.Enabled() {
+					if err := d.discord.Send(alert); err != nil {
+						discordFail++
+						slog.Error("alert dispatcher: Discord delivery failed",
+							"alert_id", alert.ID,
+							"err", err,
+						)
+						// discord_sent defaults to false in DB, so no
+						// explicit update needed on failure.
+					} else {
+						discordOK++
+						// Mark as sent in the database.
+						if err := d.repo.MarkDiscordSent(ctx, alert.ID); err != nil {
+							slog.Error("alert dispatcher: failed to mark discord_sent",
+								"alert_id", alert.ID,
+								"err", err,
+							)
+						}
+					}
+				}
 
 				if saved%50 == 0 {
 					slog.Info("alert dispatcher progress",
 						"saved", saved,
 						"dropped", dropped,
+						"ws_broadcast", wsBroadcast,
+						"discord_ok", discordOK,
+						"discord_fail", discordFail,
 					)
 				}
 			}

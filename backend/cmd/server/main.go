@@ -28,6 +28,7 @@ import (
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/ruleengine"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/service"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/watcher"
+	ws "github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/websocket"
 )
 
 func main() {
@@ -83,6 +84,7 @@ func main() {
 	eventHandler := handler.NewEventHandler(eventSvc)
 	ruleHandler := handler.NewRuleHandler(ruleSvc)
 	alertHandler := handler.NewAlertHandler(alertSvc)
+	statsHandler := handler.NewStatsHandler(eventSvc, alertSvc)
 
 	// ---------------------------------------------------------------
 	// 5. Watcher Pipeline & Rule Engine Wiring
@@ -91,11 +93,19 @@ func main() {
 	// 5a. Create Alert Channel
 	alertChan := ruleengine.NewAlertChan()
 
-	// 5b. Start Alert Dispatcher
-	alertDispatcher := service.NewAlertDispatcher(alertRepo, alertChan)
+	// 5b. WebSocket Hub — must be created before the dispatcher.
+	wsHub := ws.NewHub()
+	go wsHub.Run()
+
+	// 5c. Discord Notifier
+	discordNotifier := service.NewDiscordNotifier(cfg.DiscordWebhookURL)
+	slog.Info("discord notifier initialized", "enabled", discordNotifier.Enabled())
+
+	// 5d. Start Alert Dispatcher (wired to DB + WebSocket + Discord)
+	alertDispatcher := service.NewAlertDispatcher(alertRepo, alertChan, wsHub, discordNotifier)
 	alertDispatcher.Start(context.Background())
 
-	// 5c. Initialize Rule Engine
+	// 5e. Initialize Rule Engine
 	ruleLoader := ruleengine.NewRuleLoader()
 	engine := ruleengine.NewEngine(ruleLoader, alertChan)
 
@@ -111,7 +121,7 @@ func main() {
 	}
 	slog.Info("rule engine initialized", "active_rules", ruleLoader.RuleCount())
 
-	// 5d. Watcher Pipeline
+	// 5f. Watcher Pipeline
 	watcherCtx, watcherCancel := context.WithCancel(context.Background())
 	defer watcherCancel()
 
@@ -143,7 +153,7 @@ func main() {
 	}
 
 	// ---------------------------------------------------------------
-	// 6. Build the router with all handlers and middleware injected.
+	// 7. Build the router with all handlers and middleware injected.
 	// ---------------------------------------------------------------
 	corsOrigins := parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS"))
 
@@ -152,7 +162,9 @@ func main() {
 		Event:       eventHandler,
 		Rule:        ruleHandler,
 		Alert:       alertHandler,
+		Stats:       statsHandler,
 		Pool:        pool,
+		WSHub:       wsHub,
 		CORSOrigins: corsOrigins,
 	})
 
