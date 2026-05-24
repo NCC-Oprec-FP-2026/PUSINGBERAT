@@ -125,7 +125,7 @@ func main() {
 	watcherCtx, watcherCancel := context.WithCancel(context.Background())
 	defer watcherCancel()
 
-	registry := watcher.NewRegistry(watcherCtx)
+	registry := watcher.NewRegistry(watcherCtx, wsHub)
 	logSourceSvc.SetRegistry(registry)
 
 	// Load existing sources to build logType cache

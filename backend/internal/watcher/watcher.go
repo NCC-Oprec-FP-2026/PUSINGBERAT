@@ -11,7 +11,13 @@ import (
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/parser"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/websocket"
 )
+
+// Broadcaster is an interface to broadcast WebSocket messages.
+type Broadcaster interface {
+	Broadcast(msg websocket.WSMessage)
+}
 
 // ---------------------------------------------------------------------------
 // FileWatcher — watches a single file and emits ParsedEvents
@@ -26,6 +32,7 @@ type FileWatcher struct {
 	reader    *FileReader
 	parser    parser.Parser
 	eventChan chan<- *domain.ParsedEvent
+	hub       Broadcaster
 
 	cancel context.CancelFunc // stored so the registry can stop this watcher
 }
@@ -36,6 +43,7 @@ type FileWatcherConfig struct {
 	FilePath  string
 	LogType   string
 	EventChan chan<- *domain.ParsedEvent
+	Hub       Broadcaster
 	// SeekEnd controls whether existing file content is skipped.
 	// Set to true during initial startup so historical lines are not
 	// re-ingested; false when a watcher is added via the API for
@@ -59,6 +67,7 @@ func NewFileWatcher(cfg FileWatcherConfig) (*FileWatcher, error) {
 		reader:    reader,
 		parser:    p,
 		eventChan: cfg.EventChan,
+		hub:       cfg.Hub,
 	}, nil
 }
 
@@ -139,6 +148,13 @@ func (fw *FileWatcher) Start(ctx context.Context) error {
 				"path", fw.filePath,
 				"err", err,
 			)
+			if fw.hub != nil {
+				fw.hub.Broadcast(websocket.NewWSMessage("source_status", map[string]string{
+					"source_id": fw.sourceID.String(),
+					"status":    "error",
+					"message":   err.Error(),
+				}))
+			}
 		}
 	}
 }
@@ -154,6 +170,13 @@ func (fw *FileWatcher) readAndParse() {
 			"path", fw.filePath,
 			"err", err,
 		)
+		if fw.hub != nil {
+			fw.hub.Broadcast(websocket.NewWSMessage("source_status", map[string]string{
+				"source_id": fw.sourceID.String(),
+				"status":    "error",
+				"message":   err.Error(),
+			}))
+		}
 		return
 	}
 

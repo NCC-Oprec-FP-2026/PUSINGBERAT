@@ -1,0 +1,19 @@
+id: nginx-high-error-001
+name: "High HTTP Error Rate"
+severity: medium
+enabled: true
+log_types:
+  - nginx
+
+conditions:
+  - field: status
+    operator: starts_with
+    value: "5"   # 5xx errors
+
+threshold:
+  count: 10
+  window_seconds: 30
+
+alert:
+  title: "High 5xx Error Rate on Nginx"
+  description: "{{count}} HTTP 5xx errors in {{window_seconds}}s"
