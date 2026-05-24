@@ -1,68 +1,12 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted } from 'vue'
 import AppLayout from './components/layout/AppLayout.vue'
+import { useAlertSocket } from './composables/useAlertSocket'
 
-type AlertToast = {
-  id: string
-  rule_name: string
-  severity: string
-  title: string
-  raw_line?: string
-}
-
-type AlertEnvelope = {
-  type: string
-  data: AlertToast
-}
-
-const toasts = ref<AlertToast[]>([])
-let socket: WebSocket | null = null
-let reconnectTimer: number | undefined
-
-function websocketURL() {
-  const configured = import.meta.env.VITE_WS_URL || import.meta.env.VITE_WS_BASE_URL
-  if (configured) {
-    return configured
-  }
-
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/ws`
-}
-
-function connectAlerts() {
-  socket = new WebSocket(websocketURL())
-
-  socket.onmessage = (event) => {
-    let envelope: AlertEnvelope
-    try {
-      envelope = JSON.parse(event.data) as AlertEnvelope
-    } catch {
-      return
-    }
-    if (envelope.type !== 'alert') {
-      return
-    }
-
-    const alert = envelope.data
-    toasts.value = [alert, ...toasts.value].slice(0, 4)
-    window.setTimeout(() => {
-      toasts.value = toasts.value.filter((toast) => toast.id !== alert.id)
-    }, 6000)
-  }
-
-  socket.onclose = () => {
-    reconnectTimer = window.setTimeout(connectAlerts, 2000)
-  }
-}
+const { connectAlerts, disconnectAlerts, toasts } = useAlertSocket()
 
 onMounted(connectAlerts)
-
-onBeforeUnmount(() => {
-  if (reconnectTimer) {
-    window.clearTimeout(reconnectTimer)
-  }
-  socket?.close()
-})
+onBeforeUnmount(disconnectAlerts)
 </script>
 
 <template>

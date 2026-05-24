@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+
+body {
+    font-family: "Outfit", sans-serif;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    background-color: #030712;
+}
+
+/* Base style optimized for responsive stacking on mobile/tablet */
+#main-parent {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    box-sizing: border-box;
+    width: 100%;
+}
+
+/* Explicit Grid is only applied to Desktop environments to prevent layout compression */
+@media (min-width: 1024px) {
+    body {
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    #main-parent {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        grid-template-rows: repeat(8, 1fr);
+        height: 100vh;
+        max-height: 100vh;
+        overflow: hidden;
+    }
+
+    .topbar { 
+        grid-area: 1 / 1 / 2 / 7; 
+    }
+
+    .main-dashboard-content { 
+        grid-area: 2 / 1 / 9 / 7; 
+    }
+}

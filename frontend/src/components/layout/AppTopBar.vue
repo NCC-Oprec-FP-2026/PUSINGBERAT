@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import { computed } from 'vue'
+import { useAlertSocket } from '../../composables/useAlertSocket'
 
 const route = useRoute()
+const { isConnected, status, statusLabel } = useAlertSocket()
 
 const pageTitle = computed<string>(() => {
   const name = route.name as string | undefined
@@ -33,17 +35,26 @@ const pageTitle = computed<string>(() => {
 
     <!-- Right: Status indicators -->
     <div class="flex items-center gap-4">
-      <!-- WebSocket connection indicator (placeholder) -->
       <div class="flex items-center gap-2 rounded-full border border-siem-border bg-siem-bg px-3 py-1.5">
         <span class="relative flex h-2.5 w-2.5">
-          <!-- Pulse animation ring -->
           <span
-            class="absolute inline-flex h-full w-full animate-ping rounded-full bg-severity-info opacity-75"
+            v-if="isConnected || status === 'connecting'"
+            class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+            :class="{
+              'bg-severity-info': status === 'connecting',
+              'bg-severity-low': isConnected,
+            }"
           />
-          <!-- Solid dot -->
-          <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-severity-info" />
+          <span
+            class="relative inline-flex h-2.5 w-2.5 rounded-full"
+            :class="{
+              'bg-severity-low': isConnected,
+              'bg-severity-info': status === 'connecting',
+              'bg-severity-high': status === 'disconnected',
+            }"
+          />
         </span>
-        <span class="text-xs font-medium text-siem-text-secondary">Disconnected</span>
+        <span class="text-xs font-medium text-siem-text-secondary">{{ statusLabel }}</span>
       </div>
     </div>
   </header>
