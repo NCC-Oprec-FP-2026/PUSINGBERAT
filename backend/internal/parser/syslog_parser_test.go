@@ -359,3 +359,57 @@ func TestIsSupported(t *testing.T) {
 		t.Error("IsSupported(banana) should be false")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SyslogParser — additional edge cases
+// ---------------------------------------------------------------------------
+
+func TestSyslogParser_MalformedLine_UnknownMonth(t *testing.T) {
+	t.Parallel()
+	p := &SyslogParser{}
+
+	// Unknown month format 'jan' instead of 'Jan' (case-sensitive)
+	_, err := p.Parse("jan  2 15:04:05 host app: msg")
+	if err == nil {
+		t.Fatal("expected error for unknown month format, got nil")
+	}
+}
+
+func TestSyslogParser_MalformedLine_MissingProcess(t *testing.T) {
+	t.Parallel()
+	p := &SyslogParser{}
+
+	// Hostname is there, but no process name before the message colon
+	_, err := p.Parse("Jan  2 15:04:05 host : msg")
+	if err == nil {
+		t.Fatal("expected error for missing process name, got nil")
+	}
+}
+
+func TestSyslogParser_CompletelyMalformed(t *testing.T) {
+	t.Parallel()
+	p := &SyslogParser{}
+
+	// Gibberish
+	_, err := p.Parse("This is completely malformed and has no structure")
+	if err == nil {
+		t.Fatal("expected error for completely malformed line, got nil")
+	}
+}
+
+func TestSyslogParser_MissingPIDBrackets(t *testing.T) {
+	t.Parallel()
+	p := &SyslogParser{}
+
+	// Process has number but no brackets (e.g. sshd1234)
+	ev, err := p.Parse("Jan  2 15:04:05 host sshd1234: msg")
+	if err != nil {
+		t.Fatalf("unexpected error for process without brackets: %v", err)
+	}
+	if ev.Process == nil || *ev.Process != "sshd1234" {
+		t.Errorf("process = %v, want %q", ev.Process, "sshd1234")
+	}
+	if ev.PID != nil {
+		t.Errorf("pid = %v, want nil", ev.PID)
+	}
+}

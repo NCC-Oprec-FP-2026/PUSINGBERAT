@@ -87,3 +87,36 @@ func TestNginxParser_EmptyLine(t *testing.T) {
 		t.Errorf("expected empty line error, got: %v", err)
 	}
 }
+
+func TestNginxParser_MalformedLine_MissingIP(t *testing.T) {
+	t.Parallel()
+	p := &NginxParser{}
+
+	// Missing IP address at the start of the log line
+	_, err := p.Parse("- - [05/May/2025:12:34:56 +0000] \"GET / HTTP/1.1\" 200 612")
+	if err == nil {
+		t.Fatal("expected error for missing IP, got nil")
+	}
+}
+
+func TestNginxParser_MalformedLine_MissingHTTPMethod(t *testing.T) {
+	t.Parallel()
+	p := &NginxParser{}
+
+	// Missing HTTP method (GET, POST, etc.) inside quotes
+	_, err := p.Parse(`127.0.0.1 - - [05/May/2025:12:34:56 +0000] " / HTTP/1.1" 200 612`)
+	if err == nil {
+		t.Fatal("expected error for missing HTTP method, got nil")
+	}
+}
+
+func TestNginxParser_MalformedLine_BadTimestamp(t *testing.T) {
+	t.Parallel()
+	p := &NginxParser{}
+
+	// Invalid timestamp format (missing timezone)
+	_, err := p.Parse(`127.0.0.1 - - [05/May/2025:12:34:56] "GET / HTTP/1.1" 200 612`)
+	if err == nil {
+		t.Fatal("expected error for bad timestamp format, got nil")
+	}
+}

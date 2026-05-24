@@ -109,6 +109,12 @@ func main() {
 	ruleLoader := ruleengine.NewRuleLoader()
 	engine := ruleengine.NewEngine(ruleLoader, alertChan)
 
+	// Wire the RuleLoader into the RuleService so that every rule mutation
+	// (Create, Update, Toggle, Delete) triggers an atomic in-memory
+	// hot-reload of the active ruleset. This is the key integration point
+	// for the §6.3 hot-reload architecture.
+	ruleSvc.SetLoader(ruleLoader)
+
 	// Seed YAML rules into the database (idempotent)
 	if err := ruleSvc.SeedFromDirectory(context.Background(), cfg.RulesDir); err != nil {
 		slog.Warn("failed to seed rules from directory", "err", err)
