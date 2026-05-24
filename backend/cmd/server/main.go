@@ -19,10 +19,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/google/uuid"
+
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/api"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/api/handler"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/config"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/ruleengine"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/service"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/watcher"
 )
@@ -82,27 +85,53 @@ func main() {
 	alertHandler := handler.NewAlertHandler(alertSvc)
 
 	// ---------------------------------------------------------------
-	// 5. Watcher Pipeline — file watching + event persistence.
+	// 5. Watcher Pipeline & Rule Engine Wiring
 	// ---------------------------------------------------------------
 
-	// Create a cancellable context for the entire watcher pipeline.
-	// Cancelling watcherCancel stops all file watchers and the
-	// persistence worker.
+	// 5a. Create Alert Channel
+	alertChan := ruleengine.NewAlertChan()
+
+	// 5b. Start Alert Dispatcher
+	alertDispatcher := service.NewAlertDispatcher(alertRepo, alertChan)
+	alertDispatcher.Start(context.Background())
+
+	// 5c. Initialize Rule Engine
+	ruleLoader := ruleengine.NewRuleLoader()
+	engine := ruleengine.NewEngine(ruleLoader, alertChan)
+
+	// Seed YAML rules into the database (idempotent)
+	if err := ruleSvc.SeedFromDirectory(context.Background(), cfg.RulesDir); err != nil {
+		slog.Warn("failed to seed rules from directory", "err", err)
+	}
+
+	// Load active rules from the database into the Engine's memory
+	activeRules, _ := ruleSvc.ListEnabled(context.Background())
+	if err := ruleLoader.LoadFromDB(activeRules); err != nil {
+		slog.Warn("some rules failed to load from DB", "err", err)
+	}
+	slog.Info("rule engine initialized", "active_rules", ruleLoader.RuleCount())
+
+	// 5d. Watcher Pipeline
 	watcherCtx, watcherCancel := context.WithCancel(context.Background())
 	defer watcherCancel()
 
-	// Create the watcher registry.
 	registry := watcher.NewRegistry(watcherCtx)
-
-	// Attach the registry to the LogSourceService so that Create/Delete
-	// automatically start/stop watchers.
 	logSourceSvc.SetRegistry(registry)
 
-	// Start the event persistence worker (background goroutine).
-	eventSvc.StartPersistenceWorker(watcherCtx, registry.EventChan())
-
-	// Load all existing active log sources and start watching them.
+	// Load existing sources to build logType cache
 	bootSources, err := logSourceSvc.List(context.Background())
+	logTypeCache := make(map[uuid.UUID]string)
+	for _, src := range bootSources {
+		logTypeCache[src.ID] = src.LogType
+	}
+
+	resolveLogType := func(id uuid.UUID) string {
+		return logTypeCache[id] // Fast in-memory lookup
+	}
+
+	// Start the persistence worker, injecting the engine
+	eventSvc.StartPersistenceWorker(watcherCtx, registry.EventChan(), engine, resolveLogType)
+
 	if err != nil {
 		slog.Error("failed to load log sources at boot", "err", err)
 	} else {

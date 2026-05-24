@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
+
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/ruleengine"
 )
 
 // ---------------------------------------------------------------------------
@@ -75,7 +78,12 @@ func (s *EventService) List(ctx context.Context, params repository.EventListPara
 // not stop the pipeline.
 //
 // This is called once from main.go after DI wiring is complete.
-func (s *EventService) StartPersistenceWorker(ctx context.Context, eventChan <-chan *domain.ParsedEvent) {
+func (s *EventService) StartPersistenceWorker(
+	ctx context.Context, 
+	eventChan <-chan *domain.ParsedEvent,
+	engine *ruleengine.Engine,
+	resolveLogType func(uuid.UUID) string,
+) {
 	go func() {
 		slog.Info("event persistence worker started")
 		var saved, dropped int64
@@ -107,6 +115,17 @@ func (s *EventService) StartPersistenceWorker(ctx context.Context, eventChan <-c
 					continue
 				}
 				saved++
+
+				// Resolve log_type
+				logType := ""
+				if resolveLogType != nil {
+					logType = resolveLogType(ev.LogSourceID)
+				}
+
+				// Forward to Rule Engine
+				if engine != nil {
+					engine.Evaluate(ev, logType)
+				}
 
 				if saved%100 == 0 {
 					slog.Debug("event persistence worker progress",
