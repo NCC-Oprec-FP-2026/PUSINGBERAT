@@ -8,6 +8,7 @@
   * Raditya Zhafran Pranuja ([@rdtzaa](https://github.com/rdtzaa))
 * **Timeline:** 11-23 May 2026
 * **Document Version:** 1.0
+* **Architecture Links:** [Final Architecture Diagram (PDF/PNG placeholder)](#) | [API Documentation (Bruno placeholder)](#)
 
 ---
 
@@ -34,6 +35,7 @@
 19. [Deployment Strategy](#19-deployment-strategy)
 20. [Performance Considerations](#20-performance-considerations)
 21. [Final Recommendations](#21-final-recommendations)
+22. [Local Setup Instructions and Demo Walkthrough Script](#22-local-setup-instructions-and-demo-walkthrough-script)
 
 ---
 
@@ -2506,6 +2508,54 @@ The following features, when they work together seamlessly, will create a genuin
 > **Keep it simple enough to work, sophisticated enough to impress.**
 
 A stable SIEM that processes real logs, fires real alerts, shows them in a beautiful real-time dashboard, and deploys via an automated CI/CD pipeline is a genuinely impressive piece of engineering for a university capstone — with or without every feature on the list.
+
+---
+
+## 22. Final Presentation & Handoff
+
+### 22.1 Local Setup Instructions
+To run PUSINGBERAT locally for evaluation:
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/NCC-Oprec-FP-2026/PUSINGBERAT.git
+   cd PUSINGBERAT
+   ```
+2. **Configure Environment:**
+   Copy the example environment file and update if necessary:
+   ```bash
+   cp backend/.env.example backend/.env
+   # Ensure DISCORD_WEBHOOK_URL is set if you want to test Discord alerts
+   ```
+3. **Start the System:**
+   Use Docker Compose to build and start the entire stack (PostgreSQL, Backend, Frontend, Nginx):
+   ```bash
+   cd infra
+   docker compose up -d --build
+   ```
+4. **Access the Dashboard:**
+   Open your browser and navigate to `http://localhost`.
+
+### 22.2 Demo Walkthrough Script
+For the live presentation, follow this script to demonstrate the system's capabilities:
+
+1. **The Dashboard (The "Wow" Factor)**
+   - **Action:** Open the dashboard. Point out the live statistics and charts.
+   - **Talking Point:** "This dashboard uses Vite and Vue 3. Notice the pulsing green dot in the corner—that means our real-time WebSocket connection is active. Our stats are backed by concurrent PostgreSQL queries taking under 100ms."
+2. **Register a Log Source**
+   - **Action:** Go to the Log Sources page. Add a new source (e.g., `/var/log/auth.log` or a test file).
+   - **Talking Point:** "We register log sources dynamically. The backend's fsnotify watcher spawns a goroutine for this file immediately, without requiring a server restart."
+3. **Triggering an Alert (Real-Time Ingestion)**
+   - **Action:** Open a terminal on the host machine. Run a script to append failed SSH logins to the registered log file.
+     ```bash
+     echo "May 25 10:00:00 server sshd[123]: Failed password for root from 192.168.1.100 port 22 ssh2" >> /var/log/auth.log
+     ```
+   - **Talking Point:** "As I append this line, the file watcher reads it via offset-tracking, parses it using our regex factory, and passes it to the Rule Engine."
+4. **The Alert Fires**
+   - **Action:** Switch back to the dashboard. An alert should instantly pop up (via WebSocket) without refreshing the page.
+   - **Talking Point:** "Our YAML-based Rule Engine matched the condition, generated an alert, persisted it to Postgres, and broadcasted it to the frontend in milliseconds."
+5. **Discord Integration**
+   - **Action:** Open the configured Discord channel.
+   - **Talking Point:** "Simultaneously, a background dispatcher sent the alert to our external webhook. Security teams are notified instantly, wherever they are."
 
 ---
 
