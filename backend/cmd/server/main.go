@@ -142,7 +142,18 @@ func main() {
 	}
 
 	resolveLogType := func(id uuid.UUID) string {
-		return logTypeCache[id] // Fast in-memory lookup
+		if logType, ok := logTypeCache[id]; ok {
+			return logType
+		}
+
+		source, err := logSourceRepo.GetByID(context.Background(), id)
+		if err != nil {
+			slog.Warn("failed to resolve log source type", "source_id", id, "err", err)
+			return ""
+		}
+
+		logTypeCache[id] = source.LogType
+		return source.LogType
 	}
 
 	// Start the persistence worker, injecting the engine

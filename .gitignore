@@ -131,3 +131,4 @@ frontend/.env.local
 
 siem_11day_sprint_vue_flask.html
 sum.md
+debug.sh
