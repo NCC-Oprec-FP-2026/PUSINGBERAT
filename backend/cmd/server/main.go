@@ -1,4 +1,6 @@
 // Package main is the single entrypoint for the PUSINGBERAT backend binary.
+// It wires dependencies together, sets up the Gin router, and starts the HTTP
+// server. No business logic lives here — only wiring and lifecycle management.
 package main
 
 import (
@@ -17,19 +19,22 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/google/uuid"
+
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/api"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/api/handler"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/config"
-	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
-	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/notifier"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/ruleengine"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/service"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/watcher"
-	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/websocket"
+	ws "github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/websocket"
 )
 
 func main() {
+	// ---------------------------------------------------------------
+	// 1. Load configuration from environment variables.
+	// ---------------------------------------------------------------
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("FATAL: %v\n", err)
@@ -38,12 +43,18 @@ func main() {
 	setupLogger(cfg.LogLevel)
 	slog.Info("config loaded", "server_addr", cfg.ServerAddress())
 
+	// ---------------------------------------------------------------
+	// 2. Set Gin mode based on log level.
+	// ---------------------------------------------------------------
 	if cfg.LogLevel == "debug" {
 		gin.SetMode(gin.DebugMode)
 	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
+	// ---------------------------------------------------------------
+	// 3. Connect to PostgreSQL.
+	// ---------------------------------------------------------------
 	pool, err := connectDB(cfg)
 	if err != nil {
 		log.Fatalf("FATAL: %v\n", err)
@@ -51,57 +62,92 @@ func main() {
 	defer pool.Close()
 	slog.Info("database connected", "host", cfg.DBHost, "db", cfg.DBName)
 
+	// ---------------------------------------------------------------
+	// 4. Wire dependency injection:
+	//    pgxpool → repos → services → handlers → router
+	// ---------------------------------------------------------------
+
+	// Repositories
 	logSourceRepo := repository.NewLogSourceRepo(pool)
 	eventRepo := repository.NewEventRepo(pool)
 	ruleRepo := repository.NewRuleRepo(pool)
 	alertRepo := repository.NewAlertRepo(pool)
 
-	if err := ruleengine.SeedRules(context.Background(), ruleRepo, cfg.RulesDir); err != nil {
-		slog.Warn("seed rules failed", "err", err)
-	}
-	loadedRules, err := ruleengine.LoadEnabledRulesFromDB(context.Background(), ruleRepo)
-	if err != nil {
-		slog.Warn("load enabled rules failed", "err", err)
-	}
-	slog.Info("rule engine loaded", "rules", len(loadedRules))
-
-	alertChan := make(chan domain.Alert, 100)
-	wsAlertChan := make(chan domain.Alert, 100)
-	engine := ruleengine.NewEngine(loadedRules)
+	// Services
+	logSourceSvc := service.NewLogSourceService(logSourceRepo)
+	eventSvc := service.NewEventService(eventRepo)
+	ruleSvc := service.NewRuleService(ruleRepo)
 	alertSvc := service.NewAlertService(alertRepo)
 
-	var discordNotifier ruleengine.AlertNotifier
-	if cfg.DiscordWebhookURL != "" {
-		discordNotifier = notifier.NewDiscordNotifier(cfg.DiscordWebhookURL)
-		slog.Info("discord notifier enabled")
-	} else {
-		slog.Info("discord notifier disabled", "reason", "DISCORD_WEBHOOK_URL is empty")
-	}
-
-	hub := websocket.NewHub()
-	go hub.Run(context.Background())
-	go forwardAlertsToWebsocket(context.Background(), wsAlertChan, hub)
-
-	dispatcher := ruleengine.NewAlertDispatcher(alertChan, alertSvc, discordNotifier, wsAlertChan)
-	go dispatcher.Run(context.Background())
-
-	logSourceSvc := service.NewLogSourceService(logSourceRepo)
-	eventSvc := service.NewEventService(eventRepo, engine, alertChan)
-	ruleSvc := service.NewRuleService(ruleRepo)
-
+	// Handlers
 	logSourceHandler := handler.NewLogSourceHandler(logSourceSvc)
 	eventHandler := handler.NewEventHandler(eventSvc)
 	ruleHandler := handler.NewRuleHandler(ruleSvc)
 	alertHandler := handler.NewAlertHandler(alertSvc)
+	statsHandler := handler.NewStatsHandler(eventSvc, alertSvc)
 
+	// ---------------------------------------------------------------
+	// 5. Watcher Pipeline & Rule Engine Wiring
+	// ---------------------------------------------------------------
+
+	// 5a. Create Alert Channel
+	alertChan := ruleengine.NewAlertChan()
+
+	// 5b. WebSocket Hub — must be created before the dispatcher.
+	wsHub := ws.NewHub()
+	go wsHub.Run()
+
+	// 5c. Discord Notifier
+	discordNotifier := service.NewDiscordNotifier(cfg.DiscordWebhookURL)
+	slog.Info("discord notifier initialized", "enabled", discordNotifier.Enabled())
+
+	// 5d. Start Alert Dispatcher (wired to DB + WebSocket + Discord)
+	alertDispatcher := service.NewAlertDispatcher(alertRepo, alertChan, wsHub, discordNotifier)
+	alertDispatcher.Start(context.Background())
+
+	// 5e. Initialize Rule Engine
+	ruleLoader := ruleengine.NewRuleLoader()
+	engine := ruleengine.NewEngine(ruleLoader, alertChan)
+
+	// Wire the RuleLoader into the RuleService so that every rule mutation
+	// (Create, Update, Toggle, Delete) triggers an atomic in-memory
+	// hot-reload of the active ruleset. This is the key integration point
+	// for the §6.3 hot-reload architecture.
+	ruleSvc.SetLoader(ruleLoader)
+
+	// Seed YAML rules into the database (idempotent)
+	if err := ruleSvc.SeedFromDirectory(context.Background(), cfg.RulesDir); err != nil {
+		slog.Warn("failed to seed rules from directory", "err", err)
+	}
+
+	// Load active rules from the database into the Engine's memory
+	activeRules, _ := ruleSvc.ListEnabled(context.Background())
+	if err := ruleLoader.LoadFromDB(activeRules); err != nil {
+		slog.Warn("some rules failed to load from DB", "err", err)
+	}
+	slog.Info("rule engine initialized", "active_rules", ruleLoader.RuleCount())
+
+	// 5f. Watcher Pipeline
 	watcherCtx, watcherCancel := context.WithCancel(context.Background())
 	defer watcherCancel()
 
-	registry := watcher.NewRegistry(watcherCtx)
+	registry := watcher.NewRegistry(watcherCtx, wsHub)
 	logSourceSvc.SetRegistry(registry)
-	eventSvc.StartPersistenceWorker(watcherCtx, registry.EventChan())
 
+	// Load existing sources to build logType cache
 	bootSources, err := logSourceSvc.List(context.Background())
+	logTypeCache := make(map[uuid.UUID]string)
+	for _, src := range bootSources {
+		logTypeCache[src.ID] = src.LogType
+	}
+
+	resolveLogType := func(id uuid.UUID) string {
+		return logTypeCache[id] // Fast in-memory lookup
+	}
+
+	// Start the persistence worker, injecting the engine
+	eventSvc.StartPersistenceWorker(watcherCtx, registry.EventChan(), engine, resolveLogType)
+
 	if err != nil {
 		slog.Error("failed to load log sources at boot", "err", err)
 	} else {
@@ -112,16 +158,25 @@ func main() {
 		)
 	}
 
+	// ---------------------------------------------------------------
+	// 7. Build the router with all handlers and middleware injected.
+	// ---------------------------------------------------------------
+	corsOrigins := parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS"))
+
 	router := api.NewRouter(api.RouterDeps{
 		LogSource:   logSourceHandler,
 		Event:       eventHandler,
 		Rule:        ruleHandler,
 		Alert:       alertHandler,
+		Stats:       statsHandler,
 		Pool:        pool,
-		CORSOrigins: parseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")),
+		WSHub:       wsHub,
+		CORSOrigins: corsOrigins,
 	})
-	router.GET("/ws", hub.Handle)
 
+	// ---------------------------------------------------------------
+	// 7. Start the HTTP server with graceful shutdown.
+	// ---------------------------------------------------------------
 	srv := &http.Server{
 		Addr:         cfg.ServerAddress(),
 		Handler:      router,
@@ -138,6 +193,9 @@ func main() {
 		}
 	}()
 
+	// ---------------------------------------------------------------
+	// 8. Block until OS signal or fatal server error.
+	// ---------------------------------------------------------------
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -148,9 +206,16 @@ func main() {
 		log.Fatalf("FATAL: %v", err)
 	}
 
+	// ---------------------------------------------------------------
+	// 9. Graceful shutdown sequence:
+	//    a) Stop all file watchers (cancel watcherCtx)
+	//    b) Shutdown HTTP server (drain in-flight requests)
+	//    c) Pool.Close() runs via defer
+	// ---------------------------------------------------------------
 	slog.Info("stopping watcher pipeline")
 	watcherCancel()
 
+	// Give in-flight requests up to 10 seconds to complete.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -161,6 +226,11 @@ func main() {
 	slog.Info("server stopped cleanly")
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// connectDB creates a pgxpool connection pool and verifies connectivity.
 func connectDB(cfg *config.Config) (*pgxpool.Pool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -169,41 +239,31 @@ func connectDB(cfg *config.Config) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create connection pool: %w", err)
 	}
+
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("unable to ping database: %w", err)
 	}
+
 	return pool, nil
 }
 
-func forwardAlertsToWebsocket(ctx context.Context, alerts <-chan domain.Alert, hub *websocket.Hub) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case alert, ok := <-alerts:
-			if !ok {
-				return
-			}
-			hub.BroadcastAlert(alert)
-		}
-	}
-}
-
+// parseCORSOrigins splits a comma-separated list of origins into a slice.
 func parseCORSOrigins(raw string) []string {
 	if raw == "" {
 		return []string{"http://localhost:5173", "http://localhost:5000"}
 	}
 	parts := strings.Split(raw, ",")
 	origins := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
 			origins = append(origins, trimmed)
 		}
 	}
 	return origins
 }
 
+// setupLogger configures the global slog default based on the log level.
 func setupLogger(level string) {
 	var lvl slog.Level
 	switch strings.ToLower(level) {

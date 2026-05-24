@@ -211,3 +211,47 @@ func (r *AlertRepo) MarkDiscordSent(ctx context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// GetAlertsBySeverity — severity distribution for dashboard chart (Day 6)
+// ---------------------------------------------------------------------------
+
+// GetAlertsBySeverity returns alert counts grouped by severity level,
+// suitable for the dashboard donut/pie chart. All five severity levels
+// are guaranteed in the result (with zero counts for missing levels).
+func (r *AlertRepo) GetAlertsBySeverity(ctx context.Context) (map[string]int64, error) {
+	query := `
+		SELECT severity::text, COUNT(*)
+		FROM alerts
+		GROUP BY severity`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("alertRepo.GetAlertsBySeverity: %w", err)
+	}
+	defer rows.Close()
+
+	// Pre-populate all severity levels with zero so the frontend always
+	// receives a consistent set of keys.
+	result := map[string]int64{
+		"info":     0,
+		"low":      0,
+		"medium":   0,
+		"high":     0,
+		"critical": 0,
+	}
+
+	for rows.Next() {
+		var sev string
+		var count int64
+		if err := rows.Scan(&sev, &count); err != nil {
+			return nil, fmt.Errorf("alertRepo.GetAlertsBySeverity scan: %w", err)
+		}
+		result[sev] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("alertRepo.GetAlertsBySeverity rows: %w", err)
+	}
+	return result, nil
+}
+

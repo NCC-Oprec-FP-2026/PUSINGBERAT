@@ -1,0 +1,16 @@
+meta {
+  name: Alerts by Severity
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/v1/stats/alerts/by-severity
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data: isDefined
+}

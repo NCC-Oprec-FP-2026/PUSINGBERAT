@@ -15,11 +15,15 @@ import (
 // ---------------------------------------------------------------------------
 
 // LogSourceService defines the business-logic contract that the handler calls.
+// The UpdateMetadata method is the PATCH-specific entry point that only
+// touches metadata (name, description) without affecting file_path or the
+// active watcher goroutine.
 type LogSourceService interface {
 	Create(ctx context.Context, ls *domain.LogSource) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.LogSource, error)
 	List(ctx context.Context) ([]domain.LogSource, error)
 	Update(ctx context.Context, ls *domain.LogSource) error
+	UpdateMetadata(ctx context.Context, id uuid.UUID, name *string, description *string) (*domain.LogSource, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -45,12 +49,12 @@ type createLogSourceRequest struct {
 	Description *string `json:"description,omitempty"`
 }
 
-// updateLogSourceRequest is the JSON body for PATCH /sources/:id.
-type updateLogSourceRequest struct {
+// updateLogSourceMetadataRequest is the JSON body for PATCH /sources/:id.
+// Only metadata fields (name, description) are accepted. Changing file_path
+// or log_type requires a delete + re-create to properly reconfigure the
+// watcher pipeline.
+type updateLogSourceMetadataRequest struct {
 	Name        *string `json:"name,omitempty"`
-	FilePath    *string `json:"file_path,omitempty"`
-	LogType     *string `json:"log_type,omitempty"`
-	Status      *string `json:"status,omitempty"`
 	Description *string `json:"description,omitempty"`
 }
 
@@ -107,6 +111,16 @@ func (h *LogSourceHandler) List(c *gin.Context) {
 }
 
 // Update handles PATCH /api/v1/sources/:id.
+//
+// This endpoint only accepts metadata updates (name, description).
+// It does NOT accept file_path, log_type, or status changes — those would
+// require reconfiguring the watcher pipeline, which is a more complex
+// operation. This design ensures that the active filesystem watcher
+// goroutine for this source is never broken or restarted by a metadata
+// update.
+//
+// If the caller sends fields other than name/description, they are silently
+// ignored (following the "tolerant reader" pattern for PATCH semantics).
 func (h *LogSourceHandler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -114,42 +128,25 @@ func (h *LogSourceHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// Fetch existing entity to apply partial updates.
-	existing, err := h.svc.GetByID(c.Request.Context(), id)
-	if err != nil {
-		respondError(c, err)
-		return
-	}
-
-	var req updateLogSourceRequest
+	var req updateLogSourceMetadataRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondBadRequest(c, "invalid JSON body: "+err.Error())
 		return
 	}
 
-	// Apply only the fields that the client sent.
-	if req.Name != nil {
-		existing.Name = *req.Name
-	}
-	if req.FilePath != nil {
-		existing.FilePath = *req.FilePath
-	}
-	if req.LogType != nil {
-		existing.LogType = *req.LogType
-	}
-	if req.Status != nil {
-		existing.Status = domain.LogSourceStatus(*req.Status)
-	}
-	if req.Description != nil {
-		existing.Description = req.Description
+	// Validate that at least one metadata field was provided.
+	if req.Name == nil && req.Description == nil {
+		respondBadRequest(c, "at least one metadata field (name, description) is required")
+		return
 	}
 
-	if err := h.svc.Update(c.Request.Context(), existing); err != nil {
+	updated, err := h.svc.UpdateMetadata(c.Request.Context(), id, req.Name, req.Description)
+	if err != nil {
 		respondError(c, err)
 		return
 	}
 
-	respondData(c, http.StatusOK, existing)
+	respondData(c, http.StatusOK, updated)
 }
 
 // Delete handles DELETE /api/v1/sources/:id.

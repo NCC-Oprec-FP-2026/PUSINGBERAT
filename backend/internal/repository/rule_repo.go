@@ -76,6 +76,34 @@ func (r *RuleRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Rule, err
 	return rule, nil
 }
 
+// GetByName retrieves a single Rule by its unique name.
+// Returns domain.ErrNotFound if no rule with that name exists.
+func (r *RuleRepo) GetByName(ctx context.Context, name string) (*domain.Rule, error) {
+	query := `
+		SELECT id, name, description, yaml_content, severity, enabled, created_at, updated_at
+		FROM rules
+		WHERE name = $1`
+
+	rule := &domain.Rule{}
+	err := r.pool.QueryRow(ctx, query, name).Scan(
+		&rule.ID,
+		&rule.Name,
+		&rule.Description,
+		&rule.YAMLContent,
+		&rule.Severity,
+		&rule.Enabled,
+		&rule.CreatedAt,
+		&rule.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, fmt.Errorf("ruleRepo.GetByName: %w", err)
+	}
+	return rule, nil
+}
+
 // List returns all rules ordered by creation time (newest first).
 func (r *RuleRepo) List(ctx context.Context) ([]domain.Rule, error) {
 	query := `

@@ -1,3 +1,15 @@
+# =============================================================================
+# Failed Login Detection (Immediate)
+# =============================================================================
+# Fires immediately on every failed authentication attempt detected in
+# syslog.  No threshold — every occurrence generates an alert.  This
+# catches PAM "authentication failure" messages from any process (login,
+# su, gdm, etc.), not just sshd.
+#
+# Example matching line:
+#   May 22 14:05:33 dbserver login[5678]: pam_unix(login:auth): authentication failure; user=admin
+# =============================================================================
+
 id: failed-login-001
 name: "Failed Login Attempt"
 description: "Detects any authentication failure reported by PAM in syslog"
@@ -11,6 +23,8 @@ conditions:
   - field: message
     operator: contains
     value: "authentication failure"
+
+# No threshold — fires on every single match.
 
 alert:
   title: "Failed Login on {{hostname}}"

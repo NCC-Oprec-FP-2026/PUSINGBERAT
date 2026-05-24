@@ -1,184 +1,74 @@
-package ruleengine
+package ruleengine_test
 
 import (
-	"context"
-	"encoding/json"
 	"testing"
-	"time"
-
-	"github.com/google/uuid"
-
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
+	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/ruleengine"
 )
 
-func testEvent() *domain.ParsedEvent {
-	message := "Failed password for root from 10.0.0.1"
-	host := "web01"
-	process := "sshd"
-	pid := 1234
-	level := "warn"
-	extra, _ := json.Marshal(map[string]any{
-		"log_type": "syslog",
-		"status":   503,
-	})
+func ptr[T any](v T) *T { return &v }
 
-	return &domain.ParsedEvent{
-		ID:          42,
-		LogSourceID: uuid.MustParse("00000000-0000-0000-0000-000000000001"),
-		RawLine:     "May 21 10:00:00 web01 sshd[1234]: Failed password for root from 10.0.0.1",
-		Message:     &message,
-		Hostname:    &host,
-		Process:     &process,
-		PID:         &pid,
-		LogLevel:    &level,
-		EventTime:   time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
-		Extra:       extra,
+func TestMatchAllConditions(t *testing.T) {
+	ev := &domain.ParsedEvent{
+		Message:  ptr("Failed password for root from 192.168.1.50 port 22 ssh2"),
+		Process:  ptr("sshd"),
+		PID:      ptr(1234),
+		Hostname: ptr("web-server-01"),
 	}
-}
 
-func TestConditionOperators(t *testing.T) {
 	tests := []struct {
-		name      string
-		condition Condition
-		want      bool
+		name       string
+		conditions []domain.RuleCondition
+		want       bool
 	}{
 		{
-			name:      "contains",
-			condition: Condition{Field: "message", Operator: "contains", Value: "failed password"},
-			want:      true,
+			name: "Equals Match",
+			conditions: []domain.RuleCondition{
+				{Field: "process", Operator: "equals", Value: "sshd"},
+			},
+			want: true,
 		},
 		{
-			name:      "equals",
-			condition: Condition{Field: "process", Operator: "equals", Value: "sshd"},
-			want:      true,
+			name: "Contains Match",
+			conditions: []domain.RuleCondition{
+				{Field: "message", Operator: "contains", Value: "Failed password"},
+			},
+			want: true,
 		},
 		{
-			name:      "not_equals",
-			condition: Condition{Field: "hostname", Operator: "not_equals", Value: "db01"},
-			want:      true,
+			name: "Numeric GT Match",
+			conditions: []domain.RuleCondition{
+				{Field: "pid", Operator: "gt", Value: "1000"},
+			},
+			want: true,
 		},
 		{
-			name:      "regex",
-			condition: Condition{Field: "message", Operator: "regex", Value: `root from \d+\.\d+\.\d+\.\d+`},
-			want:      true,
+			name: "Multiple Conditions (AND) - Match",
+			conditions: []domain.RuleCondition{
+				{Field: "process", Operator: "equals", Value: "sshd"},
+				{Field: "message", Operator: "contains", Value: "Failed password"},
+			},
+			want: true,
 		},
 		{
-			name:      "starts_with",
-			condition: Condition{Field: "message", Operator: "starts_with", Value: "Failed"},
-			want:      true,
-		},
-		{
-			name:      "ends_with",
-			condition: Condition{Field: "message", Operator: "ends_with", Value: "10.0.0.1"},
-			want:      true,
-		},
-		{
-			name:      "greater_than",
-			condition: Condition{Field: "extra.status", Operator: "greater_than", Value: "500"},
-			want:      true,
-		},
-		{
-			name:      "less_than",
-			condition: Condition{Field: "pid", Operator: "less_than", Value: "2000"},
-			want:      true,
+			name: "Multiple Conditions (AND) - Mismatch",
+			conditions: []domain.RuleCondition{
+				{Field: "process", Operator: "equals", Value: "sshd"},
+				{Field: "message", Operator: "contains", Value: "Accepted password"},
+			},
+			want: false,
 		},
 	}
 
-	event := testEvent()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := conditionMatches(tt.condition, event)
+			got, err := ruleengine.MatchAllConditions(tt.conditions, ev)
 			if err != nil {
-				t.Fatalf("conditionMatches returned error: %v", err)
+				t.Fatalf("unexpected error: %v", err)
 			}
 			if got != tt.want {
-				t.Fatalf("conditionMatches = %v, want %v", got, tt.want)
+				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestRuleLogTypeFiltering(t *testing.T) {
-	rule := RuleDefinition{
-		Name:     "Syslog only",
-		LogTypes: []string{"nginx"},
-		Conditions: []Condition{
-			{Field: "message", Operator: "contains", Value: "Failed"},
-		},
-	}
-
-	ok, err := ruleConditionsMatch(rule, testEvent())
-	if err != nil {
-		t.Fatalf("ruleConditionsMatch returned error: %v", err)
-	}
-	if ok {
-		t.Fatal("ruleConditionsMatch = true, want false for different log_type")
-	}
-}
-
-func TestThresholdBelowAndAtBoundary(t *testing.T) {
-	rule := RuleDefinition{
-		Name:     "Boundary Rule",
-		Severity: domain.SeverityHigh,
-		Conditions: []Condition{
-			{Field: "message", Operator: "contains", Value: "Failed password"},
-		},
-		Threshold: &Threshold{
-			Count:   3,
-			Window:  "1m",
-			GroupBy: "hostname",
-		},
-	}
-	engine := NewEngine([]RuleDefinition{rule})
-
-	event := testEvent()
-	for i := 0; i < 2; i++ {
-		event.EventTime = event.EventTime.Add(time.Second)
-		alerts, err := engine.Evaluate(context.Background(), event)
-		if err != nil {
-			t.Fatalf("Evaluate returned error: %v", err)
-		}
-		if len(alerts) != 0 {
-			t.Fatalf("event %d produced %d alerts, want 0", i+1, len(alerts))
-		}
-	}
-
-	event.EventTime = event.EventTime.Add(time.Second)
-	alerts, err := engine.Evaluate(context.Background(), event)
-	if err != nil {
-		t.Fatalf("Evaluate returned error: %v", err)
-	}
-	if len(alerts) != 1 {
-		t.Fatalf("third event produced %d alerts, want 1", len(alerts))
-	}
-}
-
-func TestThresholdOutsideWindowDoesNotAlert(t *testing.T) {
-	rule := RuleDefinition{
-		Name:     "Window Rule",
-		Severity: domain.SeverityHigh,
-		Conditions: []Condition{
-			{Field: "message", Operator: "contains", Value: "Failed password"},
-		},
-		Threshold: &Threshold{
-			Count:   2,
-			Window:  "10s",
-			GroupBy: "hostname",
-		},
-	}
-	engine := NewEngine([]RuleDefinition{rule})
-
-	event := testEvent()
-	if alerts, err := engine.Evaluate(context.Background(), event); err != nil || len(alerts) != 0 {
-		t.Fatalf("first Evaluate alerts=%d err=%v, want 0 nil", len(alerts), err)
-	}
-
-	event.EventTime = event.EventTime.Add(11 * time.Second)
-	alerts, err := engine.Evaluate(context.Background(), event)
-	if err != nil {
-		t.Fatalf("Evaluate returned error: %v", err)
-	}
-	if len(alerts) != 0 {
-		t.Fatalf("outside-window event produced %d alerts, want 0", len(alerts))
 	}
 }

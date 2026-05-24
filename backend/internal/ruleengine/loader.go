@@ -1,193 +1,282 @@
 package ruleengine
 
 import (
-	"context"
-	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/goccy/go-yaml"
-	"github.com/google/uuid"
+	"sync"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
+	"github.com/goccy/go-yaml"
 )
 
-type RuleRepository interface {
-	Create(ctx context.Context, rule *domain.Rule) error
-	List(ctx context.Context) ([]domain.Rule, error)
-	ListEnabled(ctx context.Context) ([]domain.Rule, error)
+// ---------------------------------------------------------------------------
+// RuleLoader — thread-safe, hot-swappable rule store
+// ---------------------------------------------------------------------------
+
+// RuleLoader maintains an in-memory slice of parsed RuleDefinitions that the
+// Engine evaluates against incoming events.  It is safe for concurrent use:
+//
+//   - LoadFromDirectory reads YAML files from disk (used at startup).
+//   - LoadFromDB replaces the in-memory ruleset atomically (used when a
+//     rule is created/updated/deleted via the API).
+//   - GetRules returns a snapshot of the current ruleset under a read lock.
+//
+// Hot-swapping is achieved via sync.RWMutex: writers (Load*) take a write
+// lock and atomically swap the entire slice; readers (GetRules) take a read
+// lock and receive a consistent snapshot.  The engine never needs to restart
+// when rules change.
+type RuleLoader struct {
+	rules []*domain.RuleDefinition
+	mu    sync.RWMutex
 }
 
-type RuleDefinition struct {
-	DatabaseID  uuid.UUID            `yaml:"-"`
-	ID          string               `yaml:"id"`
-	Name        string               `yaml:"name"`
-	Description string               `yaml:"description"`
-	Severity    domain.SeverityLevel `yaml:"severity"`
-	Enabled     *bool                `yaml:"enabled"`
-	LogTypes    []string             `yaml:"log_types"`
-	Conditions  []Condition          `yaml:"conditions"`
-	Threshold   *Threshold           `yaml:"threshold"`
-	Alert       AlertTemplate        `yaml:"alert"`
-	yamlContent string               `yaml:"-"`
+// NewRuleLoader returns an empty RuleLoader ready for use.
+func NewRuleLoader() *RuleLoader {
+	return &RuleLoader{}
 }
 
-type Condition struct {
-	Field    string `yaml:"field"`
-	Operator string `yaml:"operator"`
-	Value    string `yaml:"value"`
+// ---------------------------------------------------------------------------
+// Read path
+// ---------------------------------------------------------------------------
+
+// GetRules returns a snapshot of the currently loaded rules.  The returned
+// slice must not be mutated by callers.
+func (l *RuleLoader) GetRules() []*domain.RuleDefinition {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	// Return a shallow copy so callers cannot corrupt the internal slice.
+	out := make([]*domain.RuleDefinition, len(l.rules))
+	copy(out, l.rules)
+	return out
 }
 
-type Threshold struct {
-	Count         int    `yaml:"count"`
-	Window        string `yaml:"window"`
-	WindowSeconds int    `yaml:"window_seconds"`
-	GroupBy       string `yaml:"group_by"`
+// RuleCount returns the number of currently loaded rules.
+func (l *RuleLoader) RuleCount() int {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return len(l.rules)
 }
 
-type AlertTemplate struct {
-	Title       string `yaml:"title"`
-	Description string `yaml:"description"`
+// ---------------------------------------------------------------------------
+// Write paths
+// ---------------------------------------------------------------------------
+
+// LoadFromDefinitions atomically replaces the in-memory rule set with the
+// provided slice.  This is the primary hot-swap entry point used by
+// RuleService after a CRUD operation.
+func (l *RuleLoader) LoadFromDefinitions(defs []*domain.RuleDefinition) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rules = defs
+	slog.Info("rule loader: rules replaced",
+		"count", len(defs),
+	)
 }
 
-func LoadRuleDefinitionsFromDir(dir string) ([]RuleDefinition, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("read rules dir: %w", err)
-	}
+// LoadFromDB parses the YAMLContent of each domain.Rule and atomically
+// replaces the in-memory ruleset with the successfully parsed definitions.
+// Rules that fail YAML parsing are logged and skipped — a single bad rule
+// must never prevent the remaining rules from loading.
+func (l *RuleLoader) LoadFromDB(dbRules []domain.Rule) error {
+	var defs []*domain.RuleDefinition
+	var errs []string
 
-	var rules []RuleDefinition
-	for _, entry := range entries {
-		if entry.IsDir() {
+	for i := range dbRules {
+		r := &dbRules[i]
+
+		if !r.Enabled {
+			slog.Debug("rule loader: skipping disabled rule",
+				"name", r.Name,
+				"id", r.ID,
+			)
 			continue
 		}
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		if ext != ".yaml" && ext != ".yml" {
-			continue
-		}
 
-		path := filepath.Join(dir, entry.Name())
-		raw, err := os.ReadFile(path)
+		def, err := ParseYAML([]byte(r.YAMLContent))
 		if err != nil {
-			return nil, fmt.Errorf("read rule %s: %w", path, err)
-		}
-		if strings.TrimSpace(string(raw)) == "" {
+			errs = append(errs, fmt.Sprintf("%s: %v", r.Name, err))
+			slog.Warn("rule loader: failed to parse rule YAML",
+				"name", r.Name,
+				"id", r.ID,
+				"err", err,
+			)
 			continue
 		}
 
-		rule, err := ParseRuleDefinition(raw)
-		if err != nil {
-			return nil, fmt.Errorf("parse rule %s: %w", path, err)
-		}
-		rules = append(rules, rule)
+		// Ensure the parsed definition's enabled flag agrees with the DB.
+		def.Enabled = r.Enabled
+		defs = append(defs, def)
 	}
 
-	return rules, nil
-}
+	l.mu.Lock()
+	l.rules = defs
+	l.mu.Unlock()
 
-func ParseRuleDefinition(raw []byte) (RuleDefinition, error) {
-	var rule RuleDefinition
-	if err := yaml.Unmarshal(raw, &rule); err != nil {
-		return RuleDefinition{}, err
+	slog.Info("rule loader: loaded rules from DB",
+		"loaded", len(defs),
+		"skipped", len(errs),
+	)
+
+	if len(errs) > 0 {
+		return fmt.Errorf("rule loader: %d rule(s) failed to parse: %s",
+			len(errs), strings.Join(errs, "; "))
 	}
-	rule.yamlContent = string(raw)
-	normalizeRuleDefinition(&rule)
-	if err := validateRuleDefinition(rule); err != nil {
-		return RuleDefinition{}, err
-	}
-	return rule, nil
-}
-
-func SeedRules(ctx context.Context, repo RuleRepository, dir string) error {
-	rules, err := LoadRuleDefinitionsFromDir(dir)
-	if err != nil {
-		return err
-	}
-
-	existingRules, err := repo.List(ctx)
-	if err != nil {
-		return err
-	}
-	existingByName := make(map[string]struct{}, len(existingRules))
-	for _, rule := range existingRules {
-		existingByName[strings.ToLower(strings.TrimSpace(rule.Name))] = struct{}{}
-	}
-
-	for _, rule := range rules {
-		if _, exists := existingByName[strings.ToLower(strings.TrimSpace(rule.Name))]; exists {
-			continue
-		}
-
-		enabled := true
-		if rule.Enabled != nil {
-			enabled = *rule.Enabled
-		}
-
-		description := rule.Description
-		dbRule := &domain.Rule{
-			Name:        rule.Name,
-			Description: &description,
-			YAMLContent: rule.yamlContent,
-			Severity:    rule.Severity,
-			Enabled:     enabled,
-		}
-		if err := repo.Create(ctx, dbRule); err != nil {
-			return err
-		}
-		existingByName[strings.ToLower(strings.TrimSpace(rule.Name))] = struct{}{}
-	}
-
 	return nil
 }
 
-func LoadEnabledRulesFromDB(ctx context.Context, repo RuleRepository) ([]RuleDefinition, error) {
-	dbRules, err := repo.ListEnabled(ctx)
+// LoadFromDirectory walks the given directory for .yaml / .yml files, parses
+// each one, and atomically replaces the in-memory ruleset.  This is the
+// startup path that reads seed rules from the rules/ directory.
+//
+// Files that fail to parse are logged and skipped.
+func (l *RuleLoader) LoadFromDirectory(dir string) error {
+	var defs []*domain.RuleDefinition
+	var errs []string
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", filepath.Base(path), readErr))
+			slog.Warn("rule loader: failed to read file",
+				"path", path,
+				"err", readErr,
+			)
+			return nil // skip file, continue walking
+		}
+
+		def, parseErr := ParseYAML(data)
+		if parseErr != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", filepath.Base(path), parseErr))
+			slog.Warn("rule loader: failed to parse YAML",
+				"path", path,
+				"err", parseErr,
+			)
+			return nil // skip file, continue walking
+		}
+
+		if !def.Enabled {
+			slog.Debug("rule loader: skipping disabled rule from file",
+				"path", path,
+				"id", def.ID,
+			)
+			return nil
+		}
+
+		defs = append(defs, def)
+		slog.Debug("rule loader: loaded rule from file",
+			"path", path,
+			"id", def.ID,
+			"name", def.Name,
+		)
+		return nil
+	})
+
 	if err != nil {
+		return fmt.Errorf("rule loader: walk directory %q: %w", dir, err)
+	}
+
+	l.mu.Lock()
+	l.rules = defs
+	l.mu.Unlock()
+
+	slog.Info("rule loader: loaded rules from directory",
+		"dir", dir,
+		"loaded", len(defs),
+		"skipped", len(errs),
+	)
+
+	if len(errs) > 0 {
+		return fmt.Errorf("rule loader: %d file(s) failed: %s",
+			len(errs), strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// YAML parsing + validation
+// ---------------------------------------------------------------------------
+
+// ParseYAML unmarshals raw YAML bytes into a RuleDefinition and validates
+// that all required fields are present and well-formed.
+func ParseYAML(data []byte) (*domain.RuleDefinition, error) {
+	var def domain.RuleDefinition
+	if err := yaml.Unmarshal(data, &def); err != nil {
+		return nil, fmt.Errorf("yaml unmarshal: %w", err)
+	}
+
+	if err := validateDefinition(&def); err != nil {
 		return nil, err
 	}
 
-	rules := make([]RuleDefinition, 0, len(dbRules))
-	for _, dbRule := range dbRules {
-		rule, err := ParseRuleDefinition([]byte(dbRule.YAMLContent))
-		if err != nil {
-			return nil, fmt.Errorf("parse DB rule %s: %w", dbRule.Name, err)
-		}
-		rule.DatabaseID = dbRule.ID
-		rules = append(rules, rule)
-	}
-
-	return rules, nil
+	return &def, nil
 }
 
-func normalizeRuleDefinition(rule *RuleDefinition) {
-	rule.Name = strings.TrimSpace(rule.Name)
-	rule.Description = strings.TrimSpace(rule.Description)
-	if rule.Severity == "" {
-		rule.Severity = domain.SeverityMedium
+// validateDefinition checks that all required fields are populated and that
+// operators / severity values are valid.
+func validateDefinition(def *domain.RuleDefinition) error {
+	if def.ID == "" {
+		return fmt.Errorf("rule validation: 'id' is required")
 	}
-	for i := range rule.Conditions {
-		rule.Conditions[i].Field = strings.TrimSpace(rule.Conditions[i].Field)
-		rule.Conditions[i].Operator = strings.ToLower(strings.TrimSpace(rule.Conditions[i].Operator))
-		rule.Conditions[i].Value = strings.TrimSpace(rule.Conditions[i].Value)
+	if def.Name == "" {
+		return fmt.Errorf("rule validation: 'name' is required")
 	}
-}
+	if !def.Severity.Valid() {
+		return fmt.Errorf("rule validation: invalid severity %q", def.Severity)
+	}
+	if len(def.Conditions) == 0 {
+		return fmt.Errorf("rule validation: at least one condition is required")
+	}
 
-func validateRuleDefinition(rule RuleDefinition) error {
-	if rule.Name == "" {
-		return errors.New("name is required")
+	for i, cond := range def.Conditions {
+		if cond.Field == "" {
+			return fmt.Errorf("rule validation: condition[%d].field is required", i)
+		}
+		if !isValidOperator(cond.Operator) {
+			return fmt.Errorf("rule validation: condition[%d].operator %q is not supported", i, cond.Operator)
+		}
+		// Value can be empty for some operators (e.g., regex "^$" matching empty strings),
+		// but for most operators an empty value is likely a misconfiguration.
+		// We do not enforce non-empty here to keep the schema flexible.
 	}
-	if len(rule.Conditions) == 0 {
-		return errors.New("at least one condition is required")
-	}
-	for _, condition := range rule.Conditions {
-		if condition.Field == "" || condition.Operator == "" {
-			return errors.New("condition field and operator are required")
+
+	if def.Threshold != nil {
+		if def.Threshold.Count < 1 {
+			return fmt.Errorf("rule validation: threshold.count must be >= 1, got %d", def.Threshold.Count)
+		}
+		if def.Threshold.WindowSeconds < 1 {
+			return fmt.Errorf("rule validation: threshold.window_seconds must be >= 1, got %d", def.Threshold.WindowSeconds)
 		}
 	}
-	if rule.Threshold != nil && rule.Threshold.Count < 1 {
-		return errors.New("threshold count must be positive")
+
+	if def.Alert.Title == "" {
+		return fmt.Errorf("rule validation: alert.title is required")
 	}
+
 	return nil
+}
+
+// isValidOperator returns true if the operator string is one of the
+// supported comparison operators.
+func isValidOperator(op string) bool {
+	switch op {
+	case "equals", "contains", "starts_with", "ends_with", "regex", "gt", "lt":
+		return true
+	}
+	return false
 }

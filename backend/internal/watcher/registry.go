@@ -44,17 +44,19 @@ type Registry struct {
 	paths     map[string]uuid.UUID        // filePath → sourceID (duplicate protection)
 	eventChan chan *domain.ParsedEvent
 	parentCtx context.Context // root context for all watcher goroutines
+	hub       Broadcaster     // broadcasts watcher errors to websocket
 }
 
 // NewRegistry creates a Registry with a buffered event channel.
 // parentCtx is propagated to every watcher goroutine — cancelling it
 // stops all watchers.
-func NewRegistry(parentCtx context.Context) *Registry {
+func NewRegistry(parentCtx context.Context, hub Broadcaster) *Registry {
 	return &Registry{
 		watchers:  make(map[uuid.UUID]*watcherEntry),
 		paths:     make(map[string]uuid.UUID),
 		eventChan: make(chan *domain.ParsedEvent, DefaultEventChanSize),
 		parentCtx: parentCtx,
+		hub:       hub,
 	}
 }
 
@@ -91,6 +93,7 @@ func (r *Registry) AddWatcher(source *domain.LogSource) error {
 		FilePath:  source.FilePath,
 		LogType:   source.LogType,
 		EventChan: r.eventChan,
+		Hub:       r.hub,
 		SeekEnd:   true, // skip existing content on startup
 	})
 	if err != nil {

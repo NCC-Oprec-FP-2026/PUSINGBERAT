@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/repository"
@@ -18,7 +20,7 @@ import (
 // EventService defines the business-logic contract that the handler calls.
 type EventService interface {
 	GetByID(ctx context.Context, id int64) (*domain.ParsedEvent, error)
-	List(ctx context.Context, params repository.EventListParams) ([]domain.ParsedEvent, int64, error)
+	ListEvents(ctx context.Context, params repository.EventFilterParams) ([]domain.ParsedEvent, int64, error)
 }
 
 // ---------------------------------------------------------------------------
@@ -52,7 +54,16 @@ func (h *EventHandler) GetByID(c *gin.Context) {
 	respondData(c, http.StatusOK, ev)
 }
 
-// List handles GET /api/v1/events with pagination query params.
+// List handles GET /api/v1/events with pagination and filter query params.
+//
+// Supported query parameters (all optional):
+//   - page       (int, default 1)
+//   - per_page   (int, default 50, max 200)
+//   - source_id  (UUID)
+//   - level      (string — e.g. "error", "info")
+//   - from       (ISO 8601 timestamp)
+//   - to         (ISO 8601 timestamp)
+//   - search     (string — ILIKE on message)
 func (h *EventHandler) List(c *gin.Context) {
 	page := queryInt(c, "page", 1)
 	perPage := queryInt(c, "per_page", 50)
@@ -64,12 +75,52 @@ func (h *EventHandler) List(c *gin.Context) {
 		page = 1
 	}
 
-	params := repository.EventListParams{
+	params := repository.EventFilterParams{
 		Limit:  perPage,
 		Offset: (page - 1) * perPage,
 	}
 
-	events, total, err := h.svc.List(c.Request.Context(), params)
+	// Optional filter: source_id
+	if raw := c.Query("source_id"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			respondBadRequest(c, "invalid source_id: must be a valid UUID")
+			return
+		}
+		params.SourceID = &id
+	}
+
+	// Optional filter: level
+	if raw := c.Query("level"); raw != "" {
+		params.Level = &raw
+	}
+
+	// Optional filter: from (ISO 8601)
+	if raw := c.Query("from"); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			respondBadRequest(c, "invalid 'from': must be ISO 8601 (RFC 3339)")
+			return
+		}
+		params.From = &t
+	}
+
+	// Optional filter: to (ISO 8601)
+	if raw := c.Query("to"); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			respondBadRequest(c, "invalid 'to': must be ISO 8601 (RFC 3339)")
+			return
+		}
+		params.To = &t
+	}
+
+	// Optional filter: search
+	if raw := c.Query("search"); raw != "" {
+		params.Search = &raw
+	}
+
+	events, total, err := h.svc.ListEvents(c.Request.Context(), params)
 	if err != nil {
 		respondError(c, err)
 		return
