@@ -20,6 +20,7 @@ type AlertService interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Alert, error)
 	List(ctx context.Context, params repository.AlertListParams) ([]domain.Alert, int64, error)
 	Acknowledge(ctx context.Context, id uuid.UUID) (*domain.Alert, error)
+	GetSeverityCounts(ctx context.Context) (map[string]int64, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -35,6 +36,17 @@ type AlertHandler struct {
 // NewAlertHandler constructs an AlertHandler with the given service.
 func NewAlertHandler(svc AlertService) *AlertHandler {
 	return &AlertHandler{svc: svc}
+}
+
+// GetSeverityCount handles GET /api/v1/alerts/severitycount.
+func (h *AlertHandler) GetSeverityCounts(c *gin.Context) {
+	counts, err := h.svc.GetSeverityCounts(c.Request.Context())
+	if err != nil {
+		respondError(c, err)
+		return
+	}
+
+	respondData(c, http.StatusOK, counts)
 }
 
 // GetByID handles GET /api/v1/alerts/:id.

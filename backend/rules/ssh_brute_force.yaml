@@ -1,0 +1,36 @@
+# =============================================================================
+# SSH Brute Force Detection
+# =============================================================================
+# Fires when 5 or more SSH authentication failures are detected from the
+# same hostname within a 60-second sliding window.  Targets syslog lines
+# from the sshd process containing "Failed password".
+#
+# Example matching line:
+#   May 22 12:00:00 webserver sshd[1234]: Failed password for root from 10.0.0.1
+# =============================================================================
+
+id: ssh-brute-force-001
+name: "SSH Brute Force Detected"
+description: "Detects repeated SSH authentication failures from the same source host"
+enabled: true
+severity: high
+
+log_types:
+  - syslog
+
+conditions:
+  - field: message
+    operator: contains
+    value: "Failed password"
+  - field: process
+    operator: equals
+    value: "sshd"
+
+threshold:
+  count: 5
+  window_seconds: 60
+  group_by: hostname
+
+alert:
+  title: "SSH Brute Force: {{hostname}}"
+  description: "{{count}} failed SSH login attempts in {{window_seconds}}s on host {{hostname}}"

@@ -1,122 +1,109 @@
-# this is just a placeholder file for development, need to be refactor for production.
-# change this for production.
-name: pusingberat-dev
+# infra/docker-compose.prod.yml
+# ============================================================
+# Production stack for PUSINGBERAT SIEM.
+#
+# Key differences from docker-compose.dev.yml:
+#   - Backend uses multi-stage Dockerfile (not Dockerfile.dev/Air)
+#   - No source code bind-mounts (image is self-contained)
+#   - GIN_MODE=release, LOG_LEVEL=info
+#   - No Flask dev server (frontend served by Nginx or CDN)
+#   - Stricter restart policies
+#   - All secrets come from environment / .env file on the host
+#
+# Usage:
+#   cd infra/
+#   docker compose -f docker-compose.prod.yml up -d
+# ============================================================
+
+name: pusingberat-prod
 
 networks:
-    siem_dev_net:
+    siem_net:
         driver: bridge
 
 services:
+
+    # ── PostgreSQL ────────────────────────────────────────────
     postgres:
         image: postgres:16-alpine
-        container_name: pusingberat_postgres_dev
-        restart: unless-stopped
+        container_name: pusingberat_postgres
+        restart: always
         environment:
-            POSTGRES_DB: ${POSTGRES_DB:-pusingberat}
-            POSTGRES_USER: ${POSTGRES_USER:-siem}
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-siempass}
-        ports:
-            - "${POSTGRES_HOST_PORT:-5432}:5432"
+            POSTGRES_DB:       ${POSTGRES_DB:-pusingberat}
+            POSTGRES_USER:     ${POSTGRES_USER:-siem}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+        # Do NOT expose port 5432 to the host in production.
+        # The backend accesses it via the internal Docker network.
+        expose:
+            - "5432"
         volumes:
-            - postgres_dev_data:/var/lib/postgresql/data
+            - postgres_data:/var/lib/postgresql/data
             - ../backend/migrations/001_create_tables.sql:/docker-entrypoint-initdb.d/001_create_tables.sql:ro
             - ../backend/migrations/002_add_indexes.sql:/docker-entrypoint-initdb.d/002_add_indexes.sql:ro
         healthcheck:
-            test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-siem} -d ${POSTGRES_DB:-pusingberat}" ]
-            interval: 5s
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-siem} -d ${POSTGRES_DB:-pusingberat}"]
+            interval: 10s
             timeout: 5s
             retries: 10
-            start_period: 10s
+            start_period: 15s
         networks:
-            - siem_dev_net
+            - siem_net
 
+    # ── Go Backend ────────────────────────────────────────────
+    # Built from the multi-stage production Dockerfile.
+    # The final image is ~20 MB (Alpine + static binary).
+    # No source-code volume — the binary is baked into the image.
     backend:
         build:
             context: ../backend
-            dockerfile: Dockerfile.dev
-        container_name: pusingberat_backend_dev
-        restart: unless-stopped
+            dockerfile: Dockerfile       # ← production multi-stage build
+        image: pusingberat-backend:latest
+        container_name: pusingberat_backend
+        restart: always
         environment:
-            DB_HOST: ${DB_HOST:-postgres}
-            DB_PORT: ${DB_PORT:-5432}
-            DB_NAME: ${DB_NAME:-pusingberat}
-            DB_USER: ${DB_USER:-siem}
-            DB_PASSWORD: ${DB_PASSWORD:-siempass}
-            SERVER_PORT: ${SERVER_PORT:-8080}
+            DB_HOST:             postgres
+            DB_PORT:             ${DB_PORT:-5432}
+            DB_NAME:             ${DB_NAME:-pusingberat}
+            DB_USER:             ${DB_USER:-siem}
+            DB_PASSWORD:         ${DB_PASSWORD:?DB_PASSWORD is required}
+            SERVER_PORT:         ${SERVER_PORT:-8080}
             DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
-            RULES_DIR: ${RULES_DIR:-/app/rules}
-            LOG_LEVEL: ${LOG_LEVEL:-debug}
-            GIN_MODE: debug
+            RULES_DIR:           /app/rules
+            LOG_LEVEL:           ${LOG_LEVEL:-info}
+            GIN_MODE:            release
         ports:
             - "${SERVER_PORT:-8080}:8080"
-        volumes:
-            - ../backend:/app
-            - go_mod_cache:/go/pkg/mod
-            - go_build_cache:/root/.cache/go-build
-            - /var/log:/host/var/log:ro
         depends_on:
             postgres:
                 condition: service_healthy
         healthcheck:
-            test: [ "CMD-SHELL", "wget -qO- http://localhost:${SERVER_PORT:-8080}/api/v1/health >/dev/null 2>&1" ]
-            interval: 10s
+            test: ["CMD-SHELL", "wget -qO- http://localhost:${SERVER_PORT:-8080}/api/v1/health >/dev/null 2>&1"]
+            interval: 15s
             timeout: 5s
-            retries: 10
+            retries: 5
+            start_period: 20s
         networks:
-            - siem_dev_net
-
-    frontend:
-        build:
-            context: ../frontend
-            dockerfile: Dockerfile.dev
-        container_name: pusingberat_frontend_dev
-        restart: unless-stopped
-        working_dir: /app
-        command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
-        environment:
-            VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
-            VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8080/ws}
-            NODE_ENV: development
-        ports:
-            - "5173:5173"
+            - siem_net
         volumes:
-            - ../frontend:/app
-            - frontend_node_modules:/app/node_modules
-        depends_on:
-            backend:
-                condition: service_healthy
-        networks:
-            - siem_dev_net
+            - /var/log:/host/var/log:ro
 
-    flask:
-        build:
-            context: ../frontend-server
-            dockerfile: Dockerfile.dev
-        container_name: pusingberat_flask_dev
-        restart: unless-stopped
-        command: flask --app app run --host 0.0.0.0 --port 5000 --debug
-        environment:
-            FLASK_APP: app.py
-            FLASK_DEBUG: "1"
-            FLASK_RUN_HOST: "0.0.0.0"
-            FLASK_RUN_PORT: "5000"
+    # ── Nginx ─────────────────────────────────────────────────
+    nginx:
+        image: nginx:alpine
+        container_name: pusingberat_nginx
+        restart: always
         ports:
-            - "5000:5000"
+            - "80:80"
+            - "443:443"
         volumes:
-            - ../frontend-server:/app
+            - ./nginx/conf.d:/etc/nginx/conf.d:ro
+            - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+            - ../frontend/dist:/usr/share/nginx/html:ro
+            - ./certs:/etc/nginx/certs:ro
         depends_on:
-            backend:
-                condition: service_healthy
-        healthcheck:
-            test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=2).read()\"" ]
-            interval: 10s
-            timeout: 5s
-            retries: 10
+            - backend
         networks:
-            - siem_dev_net
+            - siem_net
 
 volumes:
-    postgres_dev_data:
-    go_mod_cache:
-    go_build_cache:
-    frontend_node_modules:
+    postgres_data:

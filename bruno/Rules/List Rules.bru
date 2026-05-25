@@ -14,3 +14,10 @@ assert {
   res.status: eq 200
   res.body.data: isDefined
 }
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.data && data.data.length > 0) {
+    bru.setVar("rule_id", data.data[0].id);
+  }
+}

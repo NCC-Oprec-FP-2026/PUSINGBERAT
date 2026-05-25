@@ -99,14 +99,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- DROP TRIGGER IF EXISTS trg_log_sources_updated_at ON log_sources;
-CREATE OR REPLACE TRIGGER trg_log_sources_updated_at
+DROP TRIGGER IF EXISTS trg_log_sources_updated_at ON log_sources;
+CREATE TRIGGER trg_log_sources_updated_at
     BEFORE UPDATE ON log_sources
     FOR EACH ROW
     EXECUTE FUNCTION set_updated_at();
 
--- DROP TRIGGER IF EXISTS trg_rules_updated_at ON rules;
-CREATE OR REPLACE TRIGGER trg_rules_updated_at
+DROP TRIGGER IF EXISTS trg_rules_updated_at ON rules;
+CREATE TRIGGER trg_rules_updated_at
     BEFORE UPDATE ON rules
     FOR EACH ROW
     EXECUTE FUNCTION set_updated_at();
