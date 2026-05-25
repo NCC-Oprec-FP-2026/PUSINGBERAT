@@ -11,7 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
+
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 )
@@ -57,13 +58,21 @@ type EventFilterParams struct {
 	Search   *string    // ILIKE search on message column
 }
 
-// EventRepo provides CRUD operations for the events table.
-type EventRepo struct {
-	pool *pgxpool.Pool
+// DBQuery defines the minimal set of methods EventRepo needs from a pgx pool.
+// This interface allows for easy mocking in unit tests.
+type DBQuery interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
-// NewEventRepo creates a new EventRepo backed by the given connection pool.
-func NewEventRepo(pool *pgxpool.Pool) *EventRepo {
+// EventRepo handles database operations for ParsedEvents and dashboard statistics.
+type EventRepo struct {
+	pool DBQuery
+}
+
+// NewEventRepo constructs a new EventRepo using the provided database pool.
+func NewEventRepo(pool DBQuery) *EventRepo {
 	return &EventRepo{pool: pool}
 }
 

@@ -55,3 +55,40 @@ func TestRegistry_GoroutineLeak(t *testing.T) {
 		t.Errorf("goroutine leak detected! baseline=%d, final=%d", baseline, final)
 	}
 }
+
+func TestRegistry_Methods(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reg := NewRegistry(ctx, nil)
+
+	if reg.EventChan() == nil {
+		t.Error("expected non-nil event chan")
+	}
+
+	source := &domain.LogSource{
+		ID:       uuid.New(),
+		FilePath: "/tmp/leak_test_methods.log",
+		LogType:  "generic",
+		Status:   domain.LogSourceStatusActive,
+	}
+
+	// Test StartAll
+	reg.StartAll([]domain.LogSource{*source})
+	
+	if reg.ActiveCount() != 1 {
+		t.Errorf("expected 1 active watcher, got %d", reg.ActiveCount())
+	}
+	
+	if !reg.IsWatching(source.ID) {
+		t.Error("expected IsWatching to be true")
+	}
+
+	// Test StopAll
+	reg.StopAll()
+	time.Sleep(100 * time.Millisecond)
+
+	if reg.ActiveCount() != 0 {
+		t.Errorf("expected 0 active watchers after StopAll, got %d", reg.ActiveCount())
+	}
+}

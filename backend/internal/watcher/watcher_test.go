@@ -169,3 +169,15 @@ func TestFileWatcher_FileDeletion(t *testing.T) {
 		t.Fatalf("goroutine failed to exit after context cancellation")
 	}
 }
+
+func TestFileWatcher_Stop(t *testing.T) {
+	fw := &FileWatcher{
+		cancel: func() {}, // stub
+	}
+	// Calling Stop shouldn't panic
+	fw.Stop()
+	
+	// Calling Stop on a watcher with no cancel shouldn't panic
+	fw2 := &FileWatcher{}
+	fw2.Stop()
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -245,4 +246,20 @@ func TestEventService_GetTopSources_RepoError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+}
+
+func TestEventService_StartPersistenceWorker(t *testing.T) {
+	svc := NewEventService(&mockEventRepo{
+		createFn: func(ctx context.Context, ev *domain.ParsedEvent) error { return nil },
+	})
+	eventChan := make(chan *domain.ParsedEvent, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc.StartPersistenceWorker(ctx, eventChan, nil, func(u uuid.UUID) string { return "syslog" })
+	
+	eventChan <- &domain.ParsedEvent{}
+	close(eventChan)
+	// let it process
+	time.Sleep(100 * time.Millisecond)
 }
