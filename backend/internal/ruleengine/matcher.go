@@ -1,6 +1,7 @@
 package ruleengine
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -83,6 +84,22 @@ func resolveField(field string, ev *domain.ParsedEvent) string {
 	case "raw_line":
 		return ev.RawLine
 	default:
+		// Attempt to extract from the Extra JSON map for dynamic fields (like status, path, etc.)
+		if len(ev.Extra) > 0 {
+			var extraMap map[string]interface{}
+			if err := json.Unmarshal(ev.Extra, &extraMap); err == nil {
+				if val, ok := extraMap[field]; ok {
+					return fmt.Sprintf("%v", val)
+				}
+				// Also try to match exact key if it's "status" but the map has "status_code" (like in nginx parser)
+				if field == "status" {
+					if val, ok := extraMap["status_code"]; ok {
+						return fmt.Sprintf("%v", val)
+					}
+				}
+			}
+		}
+
 		// Future-proofing: unknown fields silently resolve to "" so that
 		// a rule referencing a field not yet supported doesn't crash.
 		return ""
