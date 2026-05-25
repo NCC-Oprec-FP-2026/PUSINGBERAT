@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+
+body {
+    font-family: "outfit";
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+}
+
+#main-parent {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    grid-column-gap: 0px;
+    grid-row-gap: 0px;
+    max-height: 99vh;
+}
+
+.topbar { grid-area: 1 / 1 / 2 / 7; }
+/* .sidebar { grid-area: 2 / 1 / 9 / 2; } */
+.main-dashboard-content { grid-area: 2 / 1 / 9 / 7; }

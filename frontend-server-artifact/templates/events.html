@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>PUSINGBERAT</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="shortcut icon" href="/static/img/ico_white.png" type="image/x-icon">
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/@vueuse/shared"></script>
+    <script src="https://unpkg.com/@vueuse/core"></script>
+
+    <script src="https://unpkg.com/primevue/umd/primevue.min.js"></script>
+    <script src="https://unpkg.com/@primeuix/themes/umd/aura.js"></script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+
+
+    <link rel="stylesheet" href="/statics/css/events/input_style.css">
+    <link rel="stylesheet" href="/statics/css/events/style.css">
+</head>
+<body class="font-[outfit]">
+    <div id="app">
+
+        <!-- The Dialog Overlay -->
+        <p-dialog 
+            v-model:visible="is_dialog_open" 
+            :header="'Log Event Details — ID #' + (selected_record?.id || '')" 
+            :modal="true" 
+            :draggable="false"
+            :dismissable-mask="true"
+            class="w-full max-w-2xl mx-4"
+        >
+            <div v-if="selected_record" class="flex flex-col gap-4 pt-2">
+                
+                <!-- Metadata Row Header -->
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-3 border-gray-100 dark:border-gray-800">
+                    <div class="flex items-center gap-2">
+                        <p-message :severity="events_severity_map[selected_record.log_level]" class="m-0 px-3 py-1 text-xs font-bold">
+                            {{ selected_record.log_level }}
+                        </p-message>
+                        <span class="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-gray-700 dark:text-gray-300">
+                            {{ selected_record.process }}
+                        </span>
+                    </div>
+                    <span class="text-xs font-mono text-gray-400">Host: {{ selected_record.hostname }}</span>
+                </div>
+
+                <!-- Structural Info Grid -->
+                <div class="grid grid-cols-3 gap-y-2 gap-x-4 text-xs bg-gray-50 dark:bg-gray-900 p-3 rounded border border-gray-100 dark:border-gray-800">
+                    <div class="font-semibold text-gray-500">Log Source ID:</div>
+                    <div class="col-span-2 font-mono text-gray-600 dark:text-gray-400 break-all">{{ selected_record.log_source_id }}</div>
+
+                    <div class="font-semibold text-gray-500">Event Time:</div>
+                    <div class="col-span-2 font-mono">{{ new Date(selected_record.event_time).toLocaleString() }}</div>
+
+                    <div class="font-semibold text-gray-500">Received At:</div>
+                    <div class="col-span-2 font-mono">{{ new Date(selected_record.received_at).toLocaleString() }}</div>
+                </div>
+
+                <!-- Main Cleaned Message -->
+                <div class="flex flex-col gap-1">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Message</span>
+                    <div class="text-sm p-3 bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded shadow-sm">
+                        {{ selected_record.message }}
+                    </div>
+                </div>
+
+                <!-- Raw Syslog Line (Terminal style preview) -->
+                <div class="flex flex-col gap-1">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Raw Line Content</span>
+                    <pre class="p-3 bg-gray-950 text-emerald-400 font-mono text-xs rounded overflow-x-auto whitespace-pre-wrap break-all border border-gray-900 shadow-inner"><code>{{ selected_record.raw_line }}</code></pre>
+                </div>
+
+                <!-- Extra Unstructured Metadata Block -->
+                <div class="flex flex-col gap-1">
+                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Extra Metadata Context</span>
+                    <div class="bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-800 p-2 max-h-[150px] overflow-y-auto">
+                        <pre v-if="Object.keys(selected_record.extra || {}).length" class="text-xs font-mono m-0"><code>{{ JSON.stringify(selected_record.extra, null, 2) }}</code></pre>
+                        <div v-else class="text-xs text-gray-400 italic p-1 text-center">No extra context key-values present for this log line instance.</div>
+                    </div>
+                </div>
+
+            </div>
+        </p-dialog>
+
+        <div id="main-parent">
+            <div class="topbar || mx-6 my-4 flex justify-between  "> 
+                <div id="left">
+                    <h1 class="text-3xl font-bold cursor-pointer" @click="locReplace('/')">PUSINGBERAT</h1>
+                </div>
+
+                <div id="right">
+                    <span><p-badge :value="totalRecords" severity="danger"></p-badge> Alerts today</span>
+                </div>
+            </div>
+
+
+            <div class="sidebar"> </div>
+
+
+            <div class="main-dashboard-content || w-full max-w-full ">
+                <h1 class="text-3xl font-bold my-5 mx-2">Events</h1>
+                
+                <!-- 2. Wrap the table in a container with a defined height context if using scroll-height="100%" -->
+                <div class="h-[calc(100vh-200px)] w-full">
+                    <p-datatable 
+                        :value="records_data" 
+                        :loading="loading"
+                        :lazy="true"
+                        :paginator="true"
+                        :rows="30"
+                        :total-records="total_data"
+                        @page="onPage($event)"
+                        scrollable 
+                        scroll-height="80%"
+                        class="w-full h-full"
+                    >
+                        <!-- 3. Use layout-responsive styles or rem bounds instead of strict 25% if text items are wide -->
+                        <p-column field="log_level" header="Level" class="w-1/4 min-w-[100px]">
+                            <template #body="slotProps">
+                                <p-message :severity="events_severity_map[slotProps.data.log_level]" class="justify-center m-0">
+                                    {{slotProps.data.log_level}}
+                                </p-message>    
+                            </template>
+                        </p-column>
+                        
+                        <!-- 4. Add template truncation to the message column so long logs don't stretch the cell -->
+                        <p-column field="message" header="Message" class="w-1/4 min-w-[250px]">
+                            <template #body="slotProps">
+                                <div class="truncate max-w-[300px]" :title="slotProps.data.message">
+                                    {{slotProps.data.message}}
+                                </div>
+                            </template>
+                        </p-column>
+                        
+                        <p-column field="triggered_at" header="Event Time" class="w-1/4 min-w-[150px]">
+                            <template #body="slotProps">
+                                {{new Date(slotProps.data.event_time).toLocaleString()}}
+                            </template>
+                        </p-column>
+                        
+                        <p-column header="Action" class="w-1/4 min-w-[100px]">
+                            <template #body="slotProps">
+                                <p-button 
+                                    icon="" 
+                                    label="View" 
+                                    @click="openEvent(slotProps.data.id)" 
+                                    class="p-button-sm" 
+                                />
+                            </template>
+                        </p-column>
+                    </p-datatable>
+                </div>
+            </div>
+
+
+            
+        </div>
+    </div>
+
+
+    <script>
+        // API things
+
+        const BASE_URL = 'http://localhost:8080/api/v1';
+
+        const api = {
+            async get(endpoint) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+            async post(endpoint, data = {}) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (POST ${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+
+            // 2. PATCH Method - For updating existing resources partially (Fixed your bug here)
+            async patch(endpoint, data = {}) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (PATCH ${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+
+            // 3. DELETE Method - For removing resources
+            async delete(endpoint) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`, {
+                        method: 'DELETE'
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    
+                    // Handle cases where DELETE returns No Content (204) instead of JSON
+                    if (response.status === 204) return { success: true };
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (DELETE ${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+    
+            endpoints: {
+                severity_count : '/alerts/severitycount',
+                stats: '/stats/overview',
+                alerts: '/alerts',
+                events: '/events',
+                sources: '/sources'
+            }
+        };
+
+    </script>
+
+
+    <script>
+
+    </script>
+
+    <script>
+    const { createApp, ref, onMounted } = Vue;
+    const { useTimeAgo } = VueUse;
+
+    const app = createApp({
+    setup() {
+
+
+        // dashboard data
+        
+        const data_per_page = 20  
+
+        const records_data = ref([]);
+        const loading = ref(false);
+        const total_data = ref(0);
+        const rows_per_page = ref(data_per_page);
+        const current_page = ref(1);
+
+        const is_dialog_open = ref(false)
+        const selected_record = ref({})
+
+
+
+        function locReplace(target) {
+            window.location.replace(target);
+        }
+
+        async function openEvent(id) {
+            console.log(id)
+            res = await api.get(`/events/${id}`);
+            console.log(res)
+            selected_record.value = res.data ; 
+            is_dialog_open.value = true;
+        }
+
+        async function fetchEvents(page = 1, perPage = data_per_page) {
+            loading.value = true
+            const eventsRes = await api.get(`${api.endpoints.events}?page=${page}&per_page=${perPage}`);
+            if (eventsRes.data) {
+                records_data.value = eventsRes.data
+                total_data.value = eventsRes.meta.total;
+                console.log("Events fetched:", eventsRes.data)
+            }
+
+            loading.value = false
+        }
+
+
+        const onPage = async (event) => {
+            current_page.value = event.page + 1; // PrimeVue is 0-indexed
+            rows_per_page.value = event.rows;
+            a = await fetchEvents(current_page.value, data_per_page)
+            console.log(a)
+        };
+
+
+
+        const events_severity_map = {
+            'ERROR' : 'error',
+            'WARN' : 'warn',
+            'INFO' : 'secondary'
+        }
+
+
+
+        onMounted(async () => {
+            await fetchEvents(1, data_per_page);
+        });
+
+        return {
+
+
+
+
+            is_dialog_open,
+            selected_record,
+
+            events_severity_map,
+            records_data,
+            total_data,
+
+            loading,
+
+            //fn
+            api,
+            useTimeAgo,
+            locReplace,
+            fetchEvents,
+            openEvent,
+            onPage
+        }
+
+    }
+    })
+
+
+    app.use(PrimeVue.Config, {
+        theme: {
+            preset: PrimeUIX.Themes.Aura
+        }
+    });
+
+
+    app.component('p-chip', PrimeVue.Chip);
+    app.component('p-badge', PrimeVue.Badge);
+    app.component('p-card', PrimeVue.Card);
+    app.component('p-datatable', PrimeVue.DataTable);
+    app.component('p-column', PrimeVue.Column);
+    app.component('p-message', PrimeVue.Message);
+    app.component('p-dialog', PrimeVue.Dialog);
+    app.component('p-button', PrimeVue.Button);
+
+    app.mount('#app');
+    </script>
+</body>
+</html>

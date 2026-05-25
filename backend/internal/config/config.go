@@ -32,6 +32,9 @@ type Config struct {
 
 	// Observability
 	LogLevel string
+
+	// Data Management
+	RetentionDays int
 }
 
 // DSN returns a pgx-compatible connection string built from the DB fields.
@@ -103,6 +106,7 @@ func Load() (*Config, error) {
 		DiscordWebhookURL: optional("DISCORD_WEBHOOK_URL", ""),
 		RulesDir:          optional("RULES_DIR", "./rules"),
 		LogLevel:          optional("LOG_LEVEL", "info"),
+		RetentionDays:     requireInt("RETENTION_DAYS"),
 	}
 
 	// Override DB_PORT default to 5432 when not set (requireInt already marks it
@@ -117,6 +121,12 @@ func Load() (*Config, error) {
 	if cfg.ServerPort == 0 && os.Getenv("SERVER_PORT") == "" {
 		cfg.ServerPort = 8080
 		missing = filterOut(missing, "SERVER_PORT")
+	}
+
+	// Default retention to 7 days if not provided
+	if cfg.RetentionDays == 0 && os.Getenv("RETENTION_DAYS") == "" {
+		cfg.RetentionDays = 7
+		missing = filterOut(missing, "RETENTION_DAYS")
 	}
 
 	if len(missing) > 0 {

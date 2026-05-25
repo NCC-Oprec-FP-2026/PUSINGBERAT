@@ -86,6 +86,7 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 		alerts := v1.Group("/alerts")
 		{
 			alerts.GET("", deps.Alert.List)
+			alerts.GET("/severitycount", deps.Alert.GetSeverityCounts)
 			alerts.GET("/:id", deps.Alert.GetByID)
 			alerts.PATCH("/:id/acknowledge", deps.Alert.Acknowledge)
 			alerts.DELETE("/:id", deps.Alert.Delete)

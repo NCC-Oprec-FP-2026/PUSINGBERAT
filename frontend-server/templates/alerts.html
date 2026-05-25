@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>PUSINGBERAT</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="shortcut icon" href="/static/img/ico_white.png" type="image/x-icon">
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/@vueuse/shared"></script>
+    <script src="https://unpkg.com/@vueuse/core"></script>
+
+    <script src="https://unpkg.com/primevue/umd/primevue.min.js"></script>
+    <script src="https://unpkg.com/@primeuix/themes/umd/aura.js"></script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap" rel="stylesheet">
+
+
+    <link rel="stylesheet" href="/statics/css/alerts/input_style.css">
+    <link rel="stylesheet" href="/statics/css/alerts/style.css">
+</head>
+<body class="font-[outfit]">
+    <div id="app" class="min-h-screen lg:h-screen lg:max-h-screen bg-[#030712] text-slate-100 font-['Outfit',sans-serif] antialiased selection:bg-indigo-500/30 selection:text-indigo-200 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900/40 via-[#030712] to-[#030712] overflow-x-hidden lg:overflow-hidden">
+
+        <p-dialog 
+            v-model:visible="open_select_alert_overlay" 
+            maximizable 
+            modal 
+            :header="'Alert Details: ' + selected_alert?.rule_name" 
+            :style="{ width: '100%', maxWidth: '550px' }" 
+            :breakpoints="{ '1199px': '75vw', '575px': '95vw' }"
+            class="mx-4 backdrop-blur-md"
+        >
+            <div v-if="selected_alert" class="flex flex-col gap-5 pt-4">
+                
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-900/60 p-4 rounded-xl border border-slate-800/80 backdrop-blur-sm gap-4 shadow-sm">
+                    <div class="space-y-0.5">
+                        <span class="text-[10px] text-indigo-400 block uppercase font-bold tracking-widest">Incident Title</span>
+                        <span class="text-base font-bold text-slate-100 tracking-tight">{{ selected_alert.title }}</span>
+                    </div>
+                    <p-message :severity="alert_severity_map[selected_alert.severity.toUpperCase()]" icon="" class="w-full sm:w-auto text-center font-bold tracking-wide uppercase px-3 shadow-inner">
+                        {{ selected_alert.severity.toUpperCase() }}
+                    </p-message>
+                </div>
+
+                <div class="space-y-1.5">
+                    <span class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">Description</span>
+                    <p class="m-0 text-sm text-slate-300 bg-slate-950 border border-slate-800/60 p-3.5 rounded-xl leading-relaxed shadow-inner">
+                        {{ selected_alert.description }}
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div class="bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/60 flex flex-col justify-center gap-1 shadow-sm">
+                        <span class="text-[10px] text-slate-400 block font-bold uppercase tracking-widest">TRIGGERED TIME</span>
+                        <span class="text-sm font-semibold text-slate-200">{{ useTimeAgo(new Date(selected_alert.triggered_at)) }}</span>
+                    </div>
+                    <div class="bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/60 flex flex-col justify-center items-start gap-1.5 shadow-sm">
+                        <span class="text-[10px] text-slate-400 block font-bold uppercase tracking-widest">STATUS</span>
+                        <p-badge :value="selected_alert.acknowledged ? 'Acknowledged' : 'New Incident'" :severity="selected_alert.acknowledged ? 'success' : 'danger'" class="tracking-wide font-semibold px-2 py-0.5 text-[10px]"></p-badge>
+                    </div>
+                    <div class="bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/60 sm:col-span-2 space-y-1 shadow-sm">
+                        <span class="text-[10px] text-slate-400 block font-bold uppercase tracking-widest">INCIDENT ID (UUID)</span>
+                        <span class="text-xs font-['JetBrains_Mono',monospace] text-indigo-400 block truncate select-all tracking-tight bg-slate-950/60 py-1 px-2 rounded border border-slate-800/40">{{ selected_alert.id }}</span>
+                    </div>
+                </div>
+
+                <div class="space-y-1.5">
+                    <span class="text-[10px] text-slate-400 block uppercase font-bold tracking-widest">Raw Log Entry Payload</span>
+                    <div class="relative group">
+                        <div class="absolute inset-0 bg-gradient-to-r from-emerald-500/5 to-teal-500/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl pointer-events-none"></div>
+                        <pre class="m-0 p-4 bg-slate-950 text-emerald-400 font-['JetBrains_Mono',monospace] text-[11px] rounded-xl overflow-x-auto whitespace-pre-wrap max-h-48 border border-slate-800 shadow-inner leading-relaxed select-all">{{ selected_alert.raw_line }}</pre>
+                    </div>
+                </div>
+                
+                <div class="flex flex-col-reverse sm:flex-row justify-end gap-2.5 mt-2 pt-4 border-t border-slate-800/60 w-full">
+                    <p-confirmpopup></p-confirmpopup>
+                    <p-button type="button" label="Delete" severity="danger" outlined class="w-full sm:w-auto text-xs font-bold px-4 py-2" @click="confirmDelete($event,selected_alert.id)"></p-button>
+                    <p-button type="button" label="Acknowledge" :disabled="selected_alert.acknowledged" class="w-full sm:w-auto text-xs font-bold px-5 py-2 shadow-md bg-indigo-600 hover:bg-indigo-500 border-none transition" @click="api.patch(`/alerts/${selected_alert.id}/acknowledge`).then(() => fetchAlerts()).then(() => open_select_alert_overlay = false)"></p-button>
+                </div>
+            </div>
+        </p-dialog>
+
+        <div id="main-parent">
+            
+            <div class="topbar || flex flex-col md:flex-row items-center justify-between bg-slate-900/40 backdrop-blur-md p-4 lg:p-0 lg:px-6 rounded-2xl border border-slate-800/80 shadow-[0_8px_30px_rgb(0,0,0,0.3)] gap-4 w-full box-border"> 
+                <div id="left" class="flex flex-col sm:flex-row items-center gap-4 lg:gap-6 w-full md:w-auto">
+                    <div class="flex items-center">
+                        <span class="text-xl font-black tracking-tight text-slate-100 cursor-pointer select-none font-['Outfit',sans-serif]" @click="locReplace('/')">
+                            PUSING<span class="text-indigo-500 font-extrabold tracking-wide drop-shadow-[0_0_15px_rgba(99,102,241,0.3)]">BERAT</span>
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-1 bg-slate-950/40 border border-slate-800/60 p-1 rounded-xl w-full sm:w-auto justify-around sm:justify-start">
+                        <p-button label="alerts" variant="link" size='large' @click="locReplace('/alerts')" class="text-xs font-bold tracking-wide !text-indigo-400 bg-slate-800/40 px-3 py-1.5 rounded-lg"></p-button>
+                        <p-button label="events" variant="link" size='large' @click="locReplace('/events')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
+                        <p-button label="rules" variant="link" size='large' @click="rules_view ? null : locReplace('/rules')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
+                        <p-button label="sources" variant="link" size='large' @click="locReplace('/logsources')" class="text-xs font-medium tracking-wide !text-slate-400 hover:!text-slate-200 px-3 py-1.5 transition"></p-button>
+                    </div>
+                </div>
+
+                <div id="right" class="w-full md:w-auto flex justify-center md:justify-end">
+                    <div class="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-full py-1.5 px-3.5 text-xs text-rose-400 font-semibold shadow-[0_0_15px_rgba(244,63,94,0.05)]">
+                        <p-badge :value="totalRecords" severity="danger" class="animate-pulse shadow-sm"></p-badge> 
+                        <span class="tracking-wide">Alerts today</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="main-dashboard-content bg-slate-900/20 backdrop-blur-md rounded-2xl border border-slate-800/60 p-4 sm:p-5 flex flex-col justify-between w-full shadow-[0_12px_40px_rgba(0,0,0,0.2)] box-border min-h-[520px] lg:h-full lg:overflow-hidden">
+                
+                <div class="flex items-center justify-between pb-4 border-b border-slate-800/40 flex-shrink-0">
+                    <div class="space-y-0.5">
+                        <h1 class="text-base font-bold text-slate-200 tracking-tight m-0">Alerts Pipeline Manager</h1>
+                        <p class="text-xs text-slate-500">Active real-time telemetry metrics and network anomalies</p>
+                    </div>
+                </div>
+                
+                <div class="w-full flex-1 min-h-0 mt-4 overflow-hidden rounded-xl border border-slate-800/80 shadow-sm bg-slate-950/20 flex flex-col">
+                    <p-datatable 
+                        :value="recent_alerts" 
+                        :loading="loading"
+                        :lazy="true"
+                        :paginator="true"
+                        :rows="50"
+                        :total-records="total_alerts"
+                        @page="onPage($event)"
+                        scrollable 
+                        scroll-height="flex"
+                        tableStyle="min-width: 50rem"
+                        class="w-full flex-1 flex flex-col justify-between overflow-hidden"
+                        :pt="{
+                            root: { class: 'flex flex-col flex-1 h-full min-h-0 overflow-hidden justify-between bg-transparent' },
+                            wrapper: { class: 'flex-1 min-h-0 overflow-auto' },
+                            paginator: { class: 'flex-shrink-0 border-t border-slate-800/60 bg-slate-950/40' }
+                        }"
+                    >
+                        <p-column field="severity" header="Severity" style="width: 15%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
+                            <template #body="slotProps">
+                                <p-message :severity="alert_severity_map[slotProps.data.severity]" class="justify-center font-bold py-1 text-[10px] uppercase tracking-wider rounded-lg shadow-inner m-0">
+                                    {{slotProps.data.severity}}
+                                </p-message>
+                            </template>
+                        </p-column>
+                        
+                        <p-column field="title" header="Title" style="width: 45%" class="font-semibold text-slate-200 tracking-tight text-sm" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider"></p-column>
+                        
+                        <p-column field="triggered_at" header="Time" style="width: 18%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
+                            <template #body="slotProps">
+                                <span class="text-xs text-slate-400 font-medium tracking-tight">
+                                    {{useTimeAgo(new Date(slotProps.data.time))}}
+                                </span>
+                            </template>
+                        </p-column>
+                        
+                        <p-column field="status" header="Status" style="width: 12%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
+                            <template #body="slotProps">
+                                <span class="text-xs font-semibold px-2 py-0.5 rounded text-slate-300 bg-slate-950 border border-slate-800">
+                                    {{ slotProps.data.status || 'NEW' }}
+                                </span>
+                            </template>
+                        </p-column>
+                        
+                        <p-column field="" header="Action" style="width: 10%" headerClass="text-slate-300 font-bold text-xs uppercase tracking-wider">
+                            <template #body="slotProps">
+                                <p-button 
+                                    icon="" 
+                                    label="View" 
+                                    @click="openAlert(slotProps.data.id)" 
+                                    class="p-button-sm text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700/60 transition hover:bg-slate-800" 
+                                />
+                            </template>
+                        </p-column>
+                    </p-datatable>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+
+    <script>
+        // API things
+
+        const BASE_URL = 'http://localhost:8080/api/v1';
+
+        const api = {
+            async get(endpoint) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+            async post(endpoint, data = {}) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (POST ${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+
+            // 2. PATCH Method - For updating existing resources partially (Fixed your bug here)
+            async patch(endpoint, data = {}) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(data)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (PATCH ${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+
+            // 3. DELETE Method - For removing resources
+            async delete(endpoint) {
+                try {
+                    const response = await fetch(`${BASE_URL}${endpoint}`, {
+                        method: 'DELETE'
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    
+                    // Handle cases where DELETE returns No Content (204) instead of JSON
+                    if (response.status === 204) return { success: true };
+                    return await response.json();
+                } catch (e) {
+                    console.error(`API Fetch Error (DELETE ${endpoint}):`, e);
+                    return { data: null, error: e.message };
+                }
+            },
+    
+            endpoints: {
+                severity_count : '/alerts/severitycount',
+                stats: '/stats/overview',
+                alerts: '/alerts',
+                events: '/events',
+                sources: '/sources'
+            }
+        };
+
+    </script>
+
+
+    <script>
+
+    </script>
+
+    <script>
+    const { createApp, ref, onMounted } = Vue;
+    const { useTimeAgo } = VueUse;
+
+    const app = createApp({
+    setup() {
+
+
+        // dashboard data
+        
+
+        const recent_alerts = ref([]);
+        const loading = ref(false);
+        const total_alerts = ref(0);
+        const rows_per_page = ref(10);
+        const current_page = ref(1);
+
+        const open_select_alert_overlay = ref(false)
+        const selected_alert = ref({})
+
+
+        const data_per_page = 50    
+
+        function locReplace(target) {
+            window.location.replace(target);
+        }
+
+        const confirm = PrimeVue.useConfirm();
+        const confirmDelete = (event, id) => {
+            confirm.require({
+                message: 'Are you sure you want to delete this alert?',
+                header: 'Confirm deletion',
+                icon: '',
+                rejectProps: {
+                    label: 'Cancel',
+                    severity: 'secondary',
+                    outlined: true
+                },
+                acceptProps: {
+                    label: 'Delete',
+                    severity: 'danger'
+                },
+                accept: () => {
+                    api.delete(`/alerts/${id}`).then(() => fetchAlerts()).then(() => open_select_alert_overlay.value = false)
+                },
+                reject: () => {
+                    
+                }
+            });
+        };
+
+        async function openAlert(id) {
+            console.log(id)
+            res = await api.get(`/alerts/${id}`);
+            console.log(res)
+            selected_alert.value =res.data ; 
+            open_select_alert_overlay.value = true;
+        }
+
+        async function fetchAlerts(page = 1, perPage = data_per_page) {
+            loading.value = true
+            const alertsRes = await api.get(`${api.endpoints.alerts}?page=${page}&per_page=${perPage}`);
+            if (alertsRes.data) {
+                recent_alerts.value = alertsRes.data.map(alert => ({
+                    ...alert,
+                    severity: alert.severity.toUpperCase(),
+                    title: alert.rule_name,
+                    time: alert.triggered_at,
+                    status: alert.acknowledged ? 'ACKed' : 'NEW'
+                }));
+                
+                total_alerts.value = alertsRes.meta.total;
+                // critical_events.value = alertsRes.data.filter(a => a.severity === 'critical').length;
+            }
+
+            loading.value = false
+        }
+
+
+        const onPage = async (event) => {
+            current_page.value = event.page + 1; // PrimeVue is 0-indexed
+            rows_per_page.value = event.rows;
+            a = await fetchAlerts(current_page.value, data_per_page)
+            console.log(a)
+        };
+
+
+
+        const alert_severity_map = {
+            'CRITICAL' : 'error',
+            'HIGH' : 'warn',
+            'MEDIUM' : 'info',
+            'LOW' : 'secondary',
+            'INFO' : 'secondary'
+        }
+
+
+
+        onMounted(async () => {
+            await fetchAlerts(1, data_per_page);
+        });
+
+        return {
+
+
+
+
+            open_select_alert_overlay,
+            selected_alert,
+
+            alert_severity_map,
+            recent_alerts,
+            total_alerts,
+
+            loading,
+
+            //fn
+            api,
+            useTimeAgo,
+            confirmDelete,
+            locReplace,
+            fetchAlerts,
+            openAlert,
+            onPage
+        }
+
+    }
+    })
+
+
+    app.use(PrimeVue.Config, {
+        theme: {
+            preset: PrimeUIX.Themes.Aura
+        }
+    });
+
+
+    app.component('p-chip', PrimeVue.Chip);
+    app.component('p-badge', PrimeVue.Badge);
+    app.component('p-card', PrimeVue.Card);
+    app.component('p-datatable', PrimeVue.DataTable);
+    app.component('p-column', PrimeVue.Column);
+    app.component('p-message', PrimeVue.Message);
+    app.component('p-dialog', PrimeVue.Dialog);
+    app.component('p-button', PrimeVue.Button);
+
+    app.component('p-confirmpopup', PrimeVue.ConfirmPopup);
+    app.use(PrimeVue.ConfirmationService);
+
+    app.mount('#app');
+    </script>
+</body>
+</html>

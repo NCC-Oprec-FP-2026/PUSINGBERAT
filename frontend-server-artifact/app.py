@@ -7,7 +7,7 @@ import flask
 TEMPLATES_DIR = Path("templates")
 STATIC_DIR = Path("static")
 
-app = Flask(__name__, static_folder=str(DIST_DIR), static_url_path="/")
+app = Flask(__name__, static_folder=None)
 
 
 @app.get("/health")
@@ -25,7 +25,6 @@ def health():
 @app.get("/")
 def index():
     index_file = TEMPLATES_DIR / "index.html"
-    print(TEMPLATES_DIR)
     if index_file.exists():
         # return flask.re
         return send_from_directory(TEMPLATES_DIR, "index.html")
