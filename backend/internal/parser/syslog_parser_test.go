@@ -11,8 +11,6 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
-func strPtr(s string) *string { return &s }
-func intPtr(i int) *int       { return &i }
 
 func currentYear() int { return time.Now().Year() }
 
