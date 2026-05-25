@@ -101,5 +101,13 @@ def static_files(path):
     return jsonify({"status": "not_found", "path": path}), 404
 
 
+# ── SPA catch-all ─────────────────────────────────────────────────────────────
+# Any path not matched above returns index.html so the frontend handles routing.
+# This is required for SPA navigation (e.g. refreshing /dashboard doesn't 404).
+@app.route("/<path:path>")
+def spa_fallback(path):  # noqa: ARG001
+    return serve_template("index.html")
+
+
 if __name__ == "__main__":
     app.run(debug=True)
