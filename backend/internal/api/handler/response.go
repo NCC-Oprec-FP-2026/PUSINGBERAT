@@ -36,6 +36,8 @@ type ErrorResponse struct {
 	Details string `json:"details,omitempty"`
 }
 
+const invalidUUIDMessage = "invalid UUID"
+
 // ---------------------------------------------------------------------------
 // Response helpers — keep handler methods short and consistent
 // ---------------------------------------------------------------------------

@@ -50,79 +50,32 @@ func (c *Config) ServerAddress() string {
 // Load reads all required environment variables and returns a populated Config.
 // An error is returned if any required field is missing or unparseable.
 func Load() (*Config, error) {
-	var missing []string
-
-	// --- helpers ---
-
-	// require reads an env var and records it as missing if absent.
-	require := func(key string) string {
-		v := os.Getenv(key)
-		if strings.TrimSpace(v) == "" {
-			missing = append(missing, key)
-		}
-		return v
-	}
-
-	// optional reads an env var and returns the fallback when absent.
-	optional := func(key, fallback string) string {
-		if v := os.Getenv(key); strings.TrimSpace(v) != "" {
-			return v
-		}
-		return fallback
-	}
-
-	// requireInt reads a required integer env var.
-	requireInt := func(key string) int {
-		raw := require(key)
-		if raw == "" {
-			return 0 // already recorded as missing
-		}
-		v, err := strconv.Atoi(raw)
-		if err != nil {
-			// Treat a non-numeric value as a misconfiguration (add to missing).
-			missing = append(missing, key+" (must be an integer, got: "+raw+")")
-			return 0
-		}
-		return v
-	}
-
-	// --- read values ---
+	loader := &envLoader{}
 
 	cfg := &Config{
 		// Required — application cannot start without these.
-		DBHost:     require("DB_HOST"),
-		DBName:     require("DB_NAME"),
-		DBUser:     require("DB_USER"),
-		DBPassword: require("DB_PASSWORD"),
+		DBHost:     loader.require("DB_HOST"),
+		DBName:     loader.require("DB_NAME"),
+		DBUser:     loader.require("DB_USER"),
+		DBPassword: loader.require("DB_PASSWORD"),
 
 		// Required integers.
-		DBPort:     requireInt("DB_PORT"),
-		ServerPort: requireInt("SERVER_PORT"),
+		DBPort:     loader.requireInt("DB_PORT"),
+		ServerPort: loader.requireInt("SERVER_PORT"),
 
 		// Optional with sensible defaults.
-		DiscordWebhookURL: optional("DISCORD_WEBHOOK_URL", ""),
-		RulesDir:          optional("RULES_DIR", "./rules"),
-		LogLevel:          optional("LOG_LEVEL", "info"),
+		DiscordWebhookURL: loader.optional("DISCORD_WEBHOOK_URL", ""),
+		RulesDir:          loader.optional("RULES_DIR", "./rules"),
+		LogLevel:          loader.optional("LOG_LEVEL", "info"),
 	}
 
-	// Override DB_PORT default to 5432 when not set (requireInt already marks it
-	// missing if the var is absent, so we guard on whether it was actually provided).
-	if cfg.DBPort == 0 && os.Getenv("DB_PORT") == "" {
-		// Remove the "missing" entry added by requireInt and use the default.
-		cfg.DBPort = 5432
-		missing = filterOut(missing, "DB_PORT")
-	}
+	cfg.DBPort = loader.defaultInt("DB_PORT", cfg.DBPort, 5432)
+	cfg.ServerPort = loader.defaultInt("SERVER_PORT", cfg.ServerPort, 8080)
 
-	// Override SERVER_PORT default to 8080.
-	if cfg.ServerPort == 0 && os.Getenv("SERVER_PORT") == "" {
-		cfg.ServerPort = 8080
-		missing = filterOut(missing, "SERVER_PORT")
-	}
-
-	if len(missing) > 0 {
+	if len(loader.missing) > 0 {
 		return nil, fmt.Errorf(
 			"config: missing or invalid required environment variables: %s",
-			strings.Join(missing, ", "),
+			strings.Join(loader.missing, ", "),
 		)
 	}
 
@@ -131,6 +84,48 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+type envLoader struct {
+	missing []string
+}
+
+func (l *envLoader) require(key string) string {
+	v := os.Getenv(key)
+	if strings.TrimSpace(v) == "" {
+		l.missing = append(l.missing, key)
+	}
+	return v
+}
+
+func (l *envLoader) optional(key, fallback string) string {
+	if v := os.Getenv(key); strings.TrimSpace(v) != "" {
+		return v
+	}
+	return fallback
+}
+
+func (l *envLoader) requireInt(key string) int {
+	raw := l.require(key)
+	if raw == "" {
+		return 0
+	}
+
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		l.missing = append(l.missing, key+" (must be an integer, got: "+raw+")")
+		return 0
+	}
+	return v
+}
+
+func (l *envLoader) defaultInt(key string, current, fallback int) int {
+	if current != 0 || os.Getenv(key) != "" {
+		return current
+	}
+
+	l.missing = filterOut(l.missing, key)
+	return fallback
 }
 
 // validate runs semantic checks on the loaded config values.

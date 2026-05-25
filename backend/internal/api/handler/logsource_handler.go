@@ -85,7 +85,7 @@ func (h *LogSourceHandler) Create(c *gin.Context) {
 func (h *LogSourceHandler) GetByID(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 
@@ -124,7 +124,7 @@ func (h *LogSourceHandler) List(c *gin.Context) {
 func (h *LogSourceHandler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 
@@ -153,7 +153,7 @@ func (h *LogSourceHandler) Update(c *gin.Context) {
 func (h *LogSourceHandler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 
