@@ -7,7 +7,7 @@ import flask
 TEMPLATES_DIR = Path("templates")
 STATIC_DIR = Path("static")
 
-app = Flask(__name__, static_folder=str(DIST_DIR), static_url_path="/")
+app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/")
 
 
 @app.get("/health")
