@@ -2529,8 +2529,7 @@ To run PUSINGBERAT locally for evaluation:
 3. **Start the System:**
    Use Docker Compose to build and start the entire stack (PostgreSQL, Backend, Frontend, Nginx):
    ```bash
-   cd infra
-   docker compose up -d --build
+   docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --build
    ```
 4. **Access the Dashboard:**
    Open your browser and navigate to `http://localhost`.

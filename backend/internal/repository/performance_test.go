@@ -21,7 +21,10 @@ func getTestDB(t *testing.T) *pgxpool.Pool {
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		t.Fatalf("Failed to connect to test db: %v", err)
+		t.Skipf("Skipping test: Failed to connect to test db: %v", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		t.Skipf("Skipping test: Failed to ping test db: %v", err)
 	}
 	return pool
 }

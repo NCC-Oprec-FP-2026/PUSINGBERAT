@@ -61,27 +61,13 @@ func (m *mockEventRepo) GetTopSources(ctx context.Context) ([]repository.TopSour
 	return []repository.TopSource{}, nil
 }
 
-// ---------------------------------------------------------------------------
-// Mock EventEvaluator
-// ---------------------------------------------------------------------------
-
-type mockEvaluator struct {
-	evaluateFn func(ctx context.Context, ev *domain.ParsedEvent) ([]domain.Alert, error)
-}
-
-func (m *mockEvaluator) Evaluate(ctx context.Context, ev *domain.ParsedEvent) ([]domain.Alert, error) {
-	if m.evaluateFn != nil {
-		return m.evaluateFn(ctx, ev)
-	}
-	return nil, nil
-}
 
 // ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------
 
 func TestEventService_Create_Happy(t *testing.T) {
-	svc := NewEventService(&mockEventRepo{}, nil, nil)
+	svc := NewEventService(&mockEventRepo{})
 	ev := &domain.ParsedEvent{LogSourceID: uuid.New()}
 	if err := svc.Create(context.Background(), ev); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -92,47 +78,10 @@ func TestEventService_Create_RepoError(t *testing.T) {
 	repoErr := errors.New("db error")
 	svc := NewEventService(&mockEventRepo{
 		createFn: func(_ context.Context, _ *domain.ParsedEvent) error { return repoErr },
-	}, nil, nil)
+	})
 	err := svc.Create(context.Background(), &domain.ParsedEvent{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
-	}
-}
-
-func TestEventService_Create_WithEvaluator_ReturnsAlerts(t *testing.T) {
-	rawChan := make(chan domain.Alert, 10)
-	var alertChan chan<- domain.Alert = rawChan
-	eval := &mockEvaluator{
-		evaluateFn: func(_ context.Context, _ *domain.ParsedEvent) ([]domain.Alert, error) {
-			return []domain.Alert{{Title: "alert1"}}, nil
-		},
-	}
-	svc := NewEventService(&mockEventRepo{}, eval, alertChan)
-	ev := &domain.ParsedEvent{LogSourceID: uuid.New()}
-	if err := svc.Create(context.Background(), ev); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestEventService_Create_EvaluatorError_PropagatesError(t *testing.T) {
-	rawChan2 := make(chan domain.Alert, 10)
-	var alertChan chan<- domain.Alert = rawChan2
-	eval := &mockEvaluator{
-		evaluateFn: func(_ context.Context, _ *domain.ParsedEvent) ([]domain.Alert, error) {
-			return nil, errors.New("evaluator error")
-		},
-	}
-	svc := NewEventService(&mockEventRepo{}, eval, alertChan)
-	err := svc.Create(context.Background(), &domain.ParsedEvent{})
-	if err == nil {
-		t.Fatal("expected error from evaluator, got nil")
-	}
-}
-
-func TestEventService_Create_NilEvaluator_NoError(t *testing.T) {
-	svc := NewEventService(&mockEventRepo{}, nil, nil)
-	if err := svc.Create(context.Background(), &domain.ParsedEvent{}); err != nil {
-		t.Fatalf("nil evaluator should not cause error, got: %v", err)
 	}
 }
 
@@ -145,7 +94,7 @@ func TestEventService_GetByID_Found(t *testing.T) {
 		getByIDFn: func(_ context.Context, id int64) (*domain.ParsedEvent, error) {
 			return &domain.ParsedEvent{ID: id}, nil
 		},
-	}, nil, nil)
+	})
 	ev, err := svc.GetByID(context.Background(), 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -160,7 +109,7 @@ func TestEventService_GetByID_NotFound(t *testing.T) {
 		getByIDFn: func(_ context.Context, _ int64) (*domain.ParsedEvent, error) {
 			return nil, domain.ErrNotFound
 		},
-	}, nil, nil)
+	})
 	_, err := svc.GetByID(context.Background(), 99)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -177,7 +126,7 @@ func TestEventService_ListEvents_ReturnsEvents(t *testing.T) {
 		listEventsFn: func(_ context.Context, _ repository.EventFilterParams) ([]domain.ParsedEvent, int64, error) {
 			return expected, 2, nil
 		},
-	}, nil, nil)
+	})
 	got, total, err := svc.ListEvents(context.Background(), repository.EventFilterParams{Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -195,7 +144,7 @@ func TestEventService_ListEvents_RepoError(t *testing.T) {
 		listEventsFn: func(_ context.Context, _ repository.EventFilterParams) ([]domain.ParsedEvent, int64, error) {
 			return nil, 0, errors.New("db error")
 		},
-	}, nil, nil)
+	})
 	_, _, err := svc.ListEvents(context.Background(), repository.EventFilterParams{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -212,7 +161,7 @@ func TestEventService_GetStatsOverview_Happy(t *testing.T) {
 		getStatsOverviewFn: func(_ context.Context) (*repository.StatsOverview, error) {
 			return expected, nil
 		},
-	}, nil, nil)
+	})
 	got, err := svc.GetStatsOverview(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -227,7 +176,7 @@ func TestEventService_GetStatsOverview_RepoError(t *testing.T) {
 		getStatsOverviewFn: func(_ context.Context) (*repository.StatsOverview, error) {
 			return nil, errors.New("db error")
 		},
-	}, nil, nil)
+	})
 	_, err := svc.GetStatsOverview(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -244,7 +193,7 @@ func TestEventService_GetEventsTimeline_Happy(t *testing.T) {
 		getTimelineFn: func(_ context.Context) ([]repository.TimelinePoint, error) {
 			return expected, nil
 		},
-	}, nil, nil)
+	})
 	got, err := svc.GetEventsTimeline(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -259,7 +208,7 @@ func TestEventService_GetEventsTimeline_RepoError(t *testing.T) {
 		getTimelineFn: func(_ context.Context) ([]repository.TimelinePoint, error) {
 			return nil, errors.New("db error")
 		},
-	}, nil, nil)
+	})
 	_, err := svc.GetEventsTimeline(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -276,7 +225,7 @@ func TestEventService_GetTopSources_Happy(t *testing.T) {
 		getTopSourcesFn: func(_ context.Context) ([]repository.TopSource, error) {
 			return expected, nil
 		},
-	}, nil, nil)
+	})
 	got, err := svc.GetTopSources(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -291,7 +240,7 @@ func TestEventService_GetTopSources_RepoError(t *testing.T) {
 		getTopSourcesFn: func(_ context.Context) ([]repository.TopSource, error) {
 			return nil, errors.New("db error")
 		},
-	}, nil, nil)
+	})
 	_, err := svc.GetTopSources(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")

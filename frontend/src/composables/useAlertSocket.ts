@@ -1,4 +1,7 @@
 import { computed, ref } from 'vue'
+import { useDashboard } from './useDashboard'
+
+const { recentAlerts, totalAlerts, criticalEvents, severityStats } = useDashboard()
 
 export type AlertToast = {
   id: string
@@ -84,6 +87,28 @@ function connectAlerts() {
     const alert = envelope.payload ?? envelope.data
     if (envelope.type === 'alert' && alert) {
       pushToast(alert)
+      
+      // Update global dashboard state dynamically
+      recentAlerts.value.unshift({
+        ...alert,
+        severity: (alert.severity || '').toUpperCase(),
+        title: alert.rule_name || alert.title || '',
+        time: (alert as any).triggered_at || new Date().toISOString(),
+        status: (alert as any).acknowledged ? 'ACKed' : 'NEW'
+      })
+      if (recentAlerts.value.length > 200) recentAlerts.value.length = 200
+      totalAlerts.value = recentAlerts.value.length
+      
+      const sev = (alert.severity || '').toLowerCase()
+      if (sev === 'critical') criticalEvents.value++
+      
+      switch (sev) {
+        case 'critical': severityStats.value[0]++; break;
+        case 'high': severityStats.value[1]++; break;
+        case 'medium': severityStats.value[2]++; break;
+        case 'low': severityStats.value[3]++; break;
+        case 'info': severityStats.value[4]++; break;
+      }
     }
   }
 
