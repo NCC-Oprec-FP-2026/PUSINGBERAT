@@ -59,6 +59,7 @@ services:
             dockerfile: Dockerfile       # ← production multi-stage build
         image: pusingberat-backend:latest
         container_name: pusingberat_backend
+        user: "root"
         restart: always
         environment:
             DB_HOST:             postgres
