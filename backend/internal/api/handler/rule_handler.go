@@ -87,7 +87,7 @@ func (h *RuleHandler) Create(c *gin.Context) {
 func (h *RuleHandler) GetByID(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *RuleHandler) List(c *gin.Context) {
 func (h *RuleHandler) Update(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 
@@ -149,7 +149,7 @@ func (h *RuleHandler) Update(c *gin.Context) {
 func (h *RuleHandler) Toggle(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 
@@ -166,7 +166,7 @@ func (h *RuleHandler) Toggle(c *gin.Context) {
 func (h *RuleHandler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 

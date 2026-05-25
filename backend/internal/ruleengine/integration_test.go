@@ -43,7 +43,7 @@ func TestLogLineCreatesAlert(t *testing.T) {
 	dispatcher.Start(ctx)
 
 	engine := ruleengine.NewEngine(loader, alertChan)
-	eventService := service.NewEventService(eventRepo, nil, nil)
+	eventService := service.NewEventService(eventRepo)
 	registry := watcher.NewRegistry(ctx, nil)
 	eventService.StartPersistenceWorker(ctx, registry.EventChan(), engine, func(uuid.UUID) string {
 		return "syslog"

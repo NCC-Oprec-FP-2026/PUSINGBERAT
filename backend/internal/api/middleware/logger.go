@@ -8,6 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const requestCompletedMessage = "request completed"
+
 // Logger returns a Gin middleware that logs every request using Go's
 // structured slog package. It includes the X-Request-ID if the RequestID
 // middleware has been applied earlier in the chain.
@@ -42,11 +44,11 @@ func Logger() gin.HandlerFunc {
 
 		switch {
 		case status >= 500:
-			slog.Error("request completed", attrs...)
+			slog.Error(requestCompletedMessage, attrs...)
 		case status >= 400:
-			slog.Warn("request completed", attrs...)
+			slog.Warn(requestCompletedMessage, attrs...)
 		default:
-			slog.Info("request completed", attrs...)
+			slog.Info(requestCompletedMessage, attrs...)
 		}
 	}
 }

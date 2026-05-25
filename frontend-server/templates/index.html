@@ -206,8 +206,8 @@
 
         const toast = PrimeVue.useToast();
 
-        
-        const BASE_URL = 'http://localhost:8080/api/v1';
+        const API_HOST = window.location.hostname || 'localhost';
+        const BASE_URL = window.API_BASE_URL || '/api/v1';
 
         const api = {
             async get(endpoint) {
@@ -567,7 +567,10 @@
             let wsSocket = null;
 
             function startWS() {
-                const url = 'ws://localhost:8080/ws';
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const url = window.WS_URL || (window.location.port && window.location.port !== '80' && window.location.port !== '443'
+                    ? `${wsProtocol}//${API_HOST}:8080/ws`
+                    : `${wsProtocol}//${window.location.host}/ws`);
                 try {
                     wsSocket = new WebSocket(url);
                 } catch (err) {

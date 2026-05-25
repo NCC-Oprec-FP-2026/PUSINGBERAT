@@ -127,26 +127,11 @@ func (s *EventService) StartPersistenceWorker(
 					return
 				}
 
-				if err := s.repo.Create(ctx, ev); err != nil {
-					dropped++
-					slog.Error("event persistence worker: save failed",
-						"source_id", ev.LogSourceID,
-						"err", err,
-					)
+				if !s.persistWorkerEvent(ctx, ev, &saved, &dropped) {
 					continue
 				}
-				saved++
 
-				// Resolve log_type
-				logType := ""
-				if resolveLogType != nil {
-					logType = resolveLogType(ev.LogSourceID)
-				}
-
-				// Forward to Rule Engine
-				if engine != nil {
-					engine.Evaluate(ev, logType)
-				}
+				s.evaluateWorkerEvent(ctx, ev, engine, resolveLogType)
 
 				if saved%100 == 0 {
 					slog.Debug("event persistence worker progress",
@@ -159,3 +144,34 @@ func (s *EventService) StartPersistenceWorker(
 	}()
 }
 
+func (s *EventService) persistWorkerEvent(ctx context.Context, ev *domain.ParsedEvent, saved, dropped *int64) bool {
+	if err := s.repo.Create(ctx, ev); err != nil {
+		(*dropped)++
+		slog.Error("event persistence worker: save failed",
+			"source_id", ev.LogSourceID,
+			"err", err,
+		)
+		return false
+	}
+
+	(*saved)++
+	return true
+}
+
+func (s *EventService) evaluateWorkerEvent(
+	ctx context.Context,
+	ev *domain.ParsedEvent,
+	engine *ruleengine.Engine,
+	resolveLogType func(uuid.UUID) string,
+) {
+	if engine != nil {
+		engine.Evaluate(ev, resolveEventLogType(ev, resolveLogType))
+	}
+}
+
+func resolveEventLogType(ev *domain.ParsedEvent, resolveLogType func(uuid.UUID) string) string {
+	if resolveLogType == nil {
+		return ""
+	}
+	return resolveLogType(ev.LogSourceID)
+}

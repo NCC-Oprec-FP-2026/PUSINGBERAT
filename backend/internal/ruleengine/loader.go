@@ -12,6 +12,8 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+const namedErrorFormat = "%s: %v"
+
 // ---------------------------------------------------------------------------
 // RuleLoader — thread-safe, hot-swappable rule store
 // ---------------------------------------------------------------------------
@@ -98,7 +100,7 @@ func (l *RuleLoader) LoadFromDB(dbRules []domain.Rule) error {
 
 		def, err := ParseYAML([]byte(r.YAMLContent))
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", r.Name, err))
+			errs = append(errs, fmt.Sprintf(namedErrorFormat, r.Name, err))
 			slog.Warn("rule loader: failed to parse rule YAML",
 				"name", r.Name,
 				"id", r.ID,
@@ -152,7 +154,7 @@ func (l *RuleLoader) LoadFromDirectory(dir string) error {
 
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", filepath.Base(path), readErr))
+			errs = append(errs, fmt.Sprintf(namedErrorFormat, filepath.Base(path), readErr))
 			slog.Warn("rule loader: failed to read file",
 				"path", path,
 				"err", readErr,
@@ -162,7 +164,7 @@ func (l *RuleLoader) LoadFromDirectory(dir string) error {
 
 		def, parseErr := ParseYAML(data)
 		if parseErr != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", filepath.Base(path), parseErr))
+			errs = append(errs, fmt.Sprintf(namedErrorFormat, filepath.Base(path), parseErr))
 			slog.Warn("rule loader: failed to parse YAML",
 				"path", path,
 				"err", parseErr,

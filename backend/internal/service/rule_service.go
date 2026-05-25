@@ -52,6 +52,12 @@ type RuleService struct {
 	loader *ruleengine.RuleLoader // nil until SetLoader is called
 }
 
+type ruleSeedStats struct {
+	seeded   int
+	skipped  int
+	errCount int
+}
+
 // NewRuleService constructs a RuleService with the given repository.
 func NewRuleService(repo RuleRepository) *RuleService {
 	return &RuleService{repo: repo}
@@ -254,90 +260,10 @@ func (s *RuleService) reloadActiveRules(ctx context.Context, caller string) {
 func (s *RuleService) SeedFromDirectory(ctx context.Context, dir string) error {
 	slog.Info("rule seeding: scanning directory", "dir", dir)
 
-	var seeded, skipped, errCount int
+	stats := &ruleSeedStats{}
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".yaml" && ext != ".yml" {
-			return nil
-		}
-
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			slog.Warn("rule seeding: failed to read file",
-				"path", path, "err", readErr)
-			errCount++
-			return nil
-		}
-
-		// Parse YAML to extract metadata and validate schema.
-		def, parseErr := ruleengine.ParseYAML(data)
-		if parseErr != nil {
-			slog.Warn("rule seeding: failed to parse or validate YAML",
-				"path", path, "err", parseErr)
-			errCount++
-			return nil
-		}
-
-		if def.Name == "" {
-			slog.Warn("rule seeding: skipping file with empty name", "path", path)
-			errCount++
-			return nil
-		}
-
-		// Check if rule already exists by name.
-		_, getErr := s.repo.GetByName(ctx, def.Name)
-		if getErr == nil {
-			slog.Debug("rule seeding: rule already exists, skipping",
-				"name", def.Name, "path", path)
-			skipped++
-			return nil
-		}
-		if !errors.Is(getErr, domain.ErrNotFound) {
-			slog.Error("rule seeding: DB lookup failed",
-				"name", def.Name, "err", getErr)
-			errCount++
-			return nil
-		}
-
-		// Build domain.Rule from the parsed definition.
-		var descPtr *string
-		if def.Description != "" {
-			d := def.Description
-			descPtr = &d
-		}
-
-		severity := def.Severity
-		if severity == "" {
-			severity = domain.SeverityMedium
-		}
-
-		rule := &domain.Rule{
-			Name:        def.Name,
-			Description: descPtr,
-			YAMLContent: string(data),
-			Severity:    severity,
-			Enabled:     def.Enabled,
-		}
-
-		if createErr := s.repo.Create(ctx, rule); createErr != nil {
-			slog.Error("rule seeding: failed to insert rule",
-				"name", def.Name, "err", createErr)
-			errCount++
-			return nil
-		}
-
-		slog.Info("rule seeding: rule created",
-			"name", def.Name, "id", rule.ID, "severity", rule.Severity)
-		seeded++
-		return nil
+		return s.seedRuleFile(ctx, path, info, walkErr, stats)
 	})
 
 	if err != nil {
@@ -345,8 +271,110 @@ func (s *RuleService) SeedFromDirectory(ctx context.Context, dir string) error {
 	}
 
 	slog.Info("rule seeding complete",
-		"seeded", seeded, "skipped", skipped, "errors", errCount)
+		"seeded", stats.seeded, "skipped", stats.skipped, "errors", stats.errCount)
 	return nil
+}
+
+func (s *RuleService) seedRuleFile(ctx context.Context, path string, info os.FileInfo, walkErr error, stats *ruleSeedStats) error {
+	if walkErr != nil {
+		return walkErr
+	}
+	if !isRuleSeedFile(path, info) {
+		return nil
+	}
+
+	data, def, ok := parseSeedRuleFile(path, stats)
+	if !ok {
+		return nil
+	}
+	if s.seedRuleExists(ctx, path, def.Name, stats) {
+		return nil
+	}
+
+	s.createSeedRule(ctx, data, def, stats)
+	return nil
+}
+
+func isRuleSeedFile(path string, info os.FileInfo) bool {
+	if info.IsDir() {
+		return false
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".yaml" || ext == ".yml"
+}
+
+func parseSeedRuleFile(path string, stats *ruleSeedStats) ([]byte, *domain.RuleDefinition, bool) {
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		slog.Warn("rule seeding: failed to read file", "path", path, "err", readErr)
+		stats.errCount++
+		return nil, nil, false
+	}
+
+	def, parseErr := ruleengine.ParseYAML(data)
+	if parseErr != nil {
+		slog.Warn("rule seeding: failed to parse or validate YAML", "path", path, "err", parseErr)
+		stats.errCount++
+		return nil, nil, false
+	}
+
+	if def.Name == "" {
+		slog.Warn("rule seeding: skipping file with empty name", "path", path)
+		stats.errCount++
+		return nil, nil, false
+	}
+
+	return data, def, true
+}
+
+func (s *RuleService) seedRuleExists(ctx context.Context, path, name string, stats *ruleSeedStats) bool {
+	_, getErr := s.repo.GetByName(ctx, name)
+	if getErr == nil {
+		slog.Debug("rule seeding: rule already exists, skipping", "name", name, "path", path)
+		stats.skipped++
+		return true
+	}
+
+	if !errors.Is(getErr, domain.ErrNotFound) {
+		slog.Error("rule seeding: DB lookup failed", "name", name, "err", getErr)
+		stats.errCount++
+		return true
+	}
+	return false
+}
+
+func (s *RuleService) createSeedRule(ctx context.Context, data []byte, def *domain.RuleDefinition, stats *ruleSeedStats) {
+	rule := &domain.Rule{
+		Name:        def.Name,
+		Description: descriptionPtr(def.Description),
+		YAMLContent: string(data),
+		Severity:    seedSeverity(def.Severity),
+		Enabled:     def.Enabled,
+	}
+
+	if createErr := s.repo.Create(ctx, rule); createErr != nil {
+		slog.Error("rule seeding: failed to insert rule", "name", def.Name, "err", createErr)
+		stats.errCount++
+		return
+	}
+
+	slog.Info("rule seeding: rule created", "name", def.Name, "id", rule.ID, "severity", rule.Severity)
+	stats.seeded++
+}
+
+func descriptionPtr(description string) *string {
+	if description == "" {
+		return nil
+	}
+	return &description
+}
+
+func seedSeverity(severity domain.SeverityLevel) domain.SeverityLevel {
+	if severity == "" {
+		return domain.SeverityMedium
+	}
+	return severity
 }
 
 // validate runs input checks before creating or updating a Rule.

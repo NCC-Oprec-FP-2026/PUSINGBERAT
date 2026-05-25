@@ -53,7 +53,7 @@ func (h *AlertHandler) GetSeverityCounts(c *gin.Context) {
 func (h *AlertHandler) GetByID(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 
@@ -96,7 +96,7 @@ func (h *AlertHandler) List(c *gin.Context) {
 func (h *AlertHandler) Acknowledge(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 
@@ -113,7 +113,7 @@ func (h *AlertHandler) Acknowledge(c *gin.Context) {
 func (h *AlertHandler) Delete(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		respondBadRequest(c, "invalid UUID")
+		respondBadRequest(c, invalidUUIDMessage)
 		return
 	}
 

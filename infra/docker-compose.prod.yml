@@ -1,20 +1,3 @@
-# infra/docker-compose.prod.yml
-# ============================================================
-# Production stack for PUSINGBERAT SIEM.
-#
-# Key differences from docker-compose.dev.yml:
-#   - Backend uses multi-stage Dockerfile (not Dockerfile.dev/Air)
-#   - No source code bind-mounts (image is self-contained)
-#   - GIN_MODE=release, LOG_LEVEL=info
-#   - No Flask dev server (frontend served by Nginx or CDN)
-#   - Stricter restart policies
-#   - All secrets come from environment / .env file on the host
-#
-# Usage:
-#   cd infra/
-#   docker compose -f docker-compose.prod.yml up -d
-# ============================================================
-
 name: pusingberat-prod
 
 networks:
@@ -22,24 +5,21 @@ networks:
         driver: bridge
 
 services:
-
-    # ── PostgreSQL ────────────────────────────────────────────
     postgres:
         image: postgres:16-alpine
         container_name: pusingberat_postgres
         restart: always
         environment:
-            POSTGRES_DB:       ${POSTGRES_DB:-pusingberat}
-            POSTGRES_USER:     ${POSTGRES_USER:-siem}
+            POSTGRES_DB: ${POSTGRES_DB:-pusingberat}
+            POSTGRES_USER: ${POSTGRES_USER:-siem}
             POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-        # Do NOT expose port 5432 to the host in production.
-        # The backend accesses it via the internal Docker network.
         expose:
             - "5432"
         volumes:
             - postgres_data:/var/lib/postgresql/data
             - ../backend/migrations/001_create_tables.sql:/docker-entrypoint-initdb.d/001_create_tables.sql:ro
             - ../backend/migrations/002_add_indexes.sql:/docker-entrypoint-initdb.d/002_add_indexes.sql:ro
+            - ../backend/migrations/003_seed_data.sql:/docker-entrypoint-initdb.d/003_seed_data.sql:ro
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-siem} -d ${POSTGRES_DB:-pusingberat}"]
             interval: 10s
@@ -49,60 +29,79 @@ services:
         networks:
             - siem_net
 
-    # ── Go Backend ────────────────────────────────────────────
-    # Built from the multi-stage production Dockerfile.
-    # The final image is ~20 MB (Alpine + static binary).
-    # No source-code volume — the binary is baked into the image.
     backend:
         build:
             context: ../backend
-            dockerfile: Dockerfile       # ← production multi-stage build
+            dockerfile: Dockerfile
         image: pusingberat-backend:latest
         container_name: pusingberat_backend
         user: "root"
         restart: always
         environment:
-            DB_HOST:             postgres
-            DB_PORT:             ${DB_PORT:-5432}
-            DB_NAME:             ${DB_NAME:-pusingberat}
-            DB_USER:             ${DB_USER:-siem}
-            DB_PASSWORD:         ${DB_PASSWORD:?DB_PASSWORD is required}
-            SERVER_PORT:         ${SERVER_PORT:-8080}
+            DB_HOST: postgres
+            DB_PORT: ${DB_PORT:-5432}
+            DB_NAME: ${DB_NAME:-pusingberat}
+            DB_USER: ${DB_USER:-siem}
+            DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+            SERVER_PORT: 8080
             DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
-            RULES_DIR:           /app/rules
-            LOG_LEVEL:           ${LOG_LEVEL:-info}
-            GIN_MODE:            release
-        ports:
-            - "${SERVER_PORT:-8080}:8080"
+            RULES_DIR: /app/rules
+            LOG_LEVEL: ${LOG_LEVEL:-info}
+            GIN_MODE: release
+        expose:
+            - "8080"
+        volumes:
+            - /var/log:/host/var/log:ro
         depends_on:
             postgres:
                 condition: service_healthy
         healthcheck:
-            test: ["CMD-SHELL", "wget -qO- http://localhost:${SERVER_PORT:-8080}/api/v1/health >/dev/null 2>&1"]
+            test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/health >/dev/null 2>&1"]
             interval: 15s
             timeout: 5s
             retries: 5
             start_period: 20s
         networks:
             - siem_net
-        volumes:
-            - /var/log:/host/var/log:ro
 
-    # ── Nginx ─────────────────────────────────────────────────
+    flask:
+        build:
+            context: ../frontend-server
+            dockerfile: Dockerfile
+        image: pusingberat-flask:latest
+        container_name: pusingberat_flask
+        restart: always
+        environment:
+            BACKEND_API_URL: http://backend:8080/api/v1
+        expose:
+            - "5000"
+        depends_on:
+            backend:
+                condition: service_healthy
+        healthcheck:
+            test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=2).read()\""]
+            interval: 15s
+            timeout: 5s
+            retries: 5
+            start_period: 15s
+        networks:
+            - siem_net
+
     nginx:
-        image: nginx:alpine
+        image: nginx:1.27-alpine
         container_name: pusingberat_nginx
         restart: always
         ports:
             - "80:80"
             - "443:443"
         volumes:
-            - ./nginx/conf.d:/etc/nginx/conf.d:ro
             - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-            - ../frontend/dist:/usr/share/nginx/html:ro
-            - ./certs:/etc/nginx/certs:ro
+            - /etc/letsencrypt:/etc/letsencrypt:ro
         depends_on:
-            - backend
+            backend:
+                condition: service_healthy
+            flask:
+                condition: service_healthy
         networks:
             - siem_net
 
