@@ -26,9 +26,6 @@ type EventRepository interface {
 	GetTopSources(ctx context.Context) ([]repository.TopSource, error)
 }
 
-type EventEvaluator interface {
-	Evaluate(ctx context.Context, ev *domain.ParsedEvent) ([]domain.Alert, error)
-}
 
 // ---------------------------------------------------------------------------
 // Service
@@ -37,17 +34,13 @@ type EventEvaluator interface {
 // EventService orchestrates ParsedEvent operations and hosts the background
 // persistence goroutine that drains the watcher pipeline's event channel.
 type EventService struct {
-	repo      EventRepository
-	evaluator EventEvaluator
-	alerts    chan<- domain.Alert
+	repo EventRepository
 }
 
 // NewEventService constructs an EventService with the given repository.
-func NewEventService(repo EventRepository, evaluator EventEvaluator, alerts chan<- domain.Alert) *EventService {
+func NewEventService(repo EventRepository) *EventService {
 	return &EventService{
-		repo:      repo,
-		evaluator: evaluator,
-		alerts:    alerts,
+		repo: repo,
 	}
 }
 
@@ -56,9 +49,6 @@ func NewEventService(repo EventRepository, evaluator EventEvaluator, alerts chan
 func (s *EventService) Create(ctx context.Context, ev *domain.ParsedEvent) error {
 	if err := s.repo.Create(ctx, ev); err != nil {
 		return fmt.Errorf("eventService.Create: %w", err)
-	}
-	if err := s.evaluateAndDispatch(ctx, ev); err != nil {
-		return err
 	}
 	return nil
 }
@@ -174,14 +164,6 @@ func (s *EventService) evaluateWorkerEvent(
 	engine *ruleengine.Engine,
 	resolveLogType func(uuid.UUID) string,
 ) {
-	if err := s.evaluateAndDispatch(ctx, ev); err != nil {
-		slog.Error("event persistence worker: alert evaluation failed",
-			"event_id", ev.ID,
-			"source_id", ev.LogSourceID,
-			"err", err,
-		)
-	}
-
 	if engine != nil {
 		engine.Evaluate(ev, resolveEventLogType(ev, resolveLogType))
 	}
@@ -192,23 +174,4 @@ func resolveEventLogType(ev *domain.ParsedEvent, resolveLogType func(uuid.UUID) 
 		return ""
 	}
 	return resolveLogType(ev.LogSourceID)
-}
-
-func (s *EventService) evaluateAndDispatch(ctx context.Context, ev *domain.ParsedEvent) error {
-	if s.evaluator == nil || s.alerts == nil {
-		return nil
-	}
-
-	alerts, err := s.evaluator.Evaluate(ctx, ev)
-	if err != nil {
-		return fmt.Errorf("eventService.evaluateAndDispatch: %w", err)
-	}
-	for _, alert := range alerts {
-		select {
-		case s.alerts <- alert:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	return nil
 }

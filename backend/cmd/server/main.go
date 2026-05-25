@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -75,7 +76,7 @@ func main() {
 
 	// Services
 	logSourceSvc := service.NewLogSourceService(logSourceRepo)
-	eventSvc := service.NewEventService(eventRepo, nil, nil)
+	eventSvc := service.NewEventService(eventRepo)
 	ruleSvc := service.NewRuleService(ruleRepo)
 	alertSvc := service.NewAlertService(alertRepo)
 
@@ -137,14 +138,18 @@ func main() {
 	// Load existing sources to build logType cache
 	bootSources, err := logSourceSvc.List(context.Background())
 	logTypeCache := make(map[uuid.UUID]string)
+	var logTypeMu sync.RWMutex
 	for _, src := range bootSources {
 		logTypeCache[src.ID] = src.LogType
 	}
 
 	resolveLogType := func(id uuid.UUID) string {
+		logTypeMu.RLock()
 		if logType, ok := logTypeCache[id]; ok {
+			logTypeMu.RUnlock()
 			return logType
 		}
+		logTypeMu.RUnlock()
 
 		source, err := logSourceRepo.GetByID(context.Background(), id)
 		if err != nil {
@@ -152,7 +157,9 @@ func main() {
 			return ""
 		}
 
+		logTypeMu.Lock()
 		logTypeCache[id] = source.LogType
+		logTypeMu.Unlock()
 		return source.LogType
 	}
 

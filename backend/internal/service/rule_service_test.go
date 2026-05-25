@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -399,5 +401,26 @@ func TestRuleService_Validate_WhitespaceName(t *testing.T) {
 	err := svc.Create(context.Background(), rule)
 	if !errors.Is(err, domain.ErrValidation) {
 		t.Errorf("expected ErrValidation for whitespace-only name, got %v", err)
+	}
+}
+
+func TestRuleService_SeedFromDirectory(t *testing.T) {
+	svc := NewRuleService(&mockRuleRepo{})
+	// Assuming there are rules in backend/migrations, but wait, the tests run in internal/service.
+	// We can create a temp directory and write some YAML files.
+	dir, err := os.MkdirTemp("", "rule_seed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	err = os.WriteFile(filepath.Join(dir, "rule1.yaml"), []byte(minimalYAML()), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.SeedFromDirectory(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

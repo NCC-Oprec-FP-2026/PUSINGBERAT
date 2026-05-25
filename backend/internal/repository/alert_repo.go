@@ -8,18 +8,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/NCC-Oprec-FP-2026/PUSINGBERAT/internal/domain"
 )
 
-// AlertRepo provides CRUD operations for the alerts table.
+
+
+// AlertRepo handles database operations for alerts.
 type AlertRepo struct {
-	pool *pgxpool.Pool
+	pool DBQuery
 }
 
-// NewAlertRepo creates a new AlertRepo backed by the given connection pool.
-func NewAlertRepo(pool *pgxpool.Pool) *AlertRepo {
+// NewAlertRepo constructs a new AlertRepo using the provided database pool.
+func NewAlertRepo(pool DBQuery) *AlertRepo {
 	return &AlertRepo{pool: pool}
 }
 

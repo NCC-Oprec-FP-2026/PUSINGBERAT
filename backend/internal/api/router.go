@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -84,6 +86,7 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 		alerts := v1.Group("/alerts")
 		{
 			alerts.GET("", deps.Alert.List)
+			alerts.GET("/severitycount", deps.Alert.GetSeverityCounts)
 			alerts.GET("/:id", deps.Alert.GetByID)
 			alerts.PATCH("/:id/acknowledge", deps.Alert.Acknowledge)
 			alerts.DELETE("/:id", deps.Alert.Delete)
@@ -96,6 +99,27 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 			stats.GET("/events/timeline", deps.Stats.EventsTimeline)
 			stats.GET("/alerts/by-severity", deps.Stats.AlertsBySeverity)
 			stats.GET("/top-sources", deps.Stats.TopSources)
+		}
+	}
+
+	// ---------------------------------------------------------------
+	// pprof - Performance profiling endpoints (enabled via env flag)
+	// ---------------------------------------------------------------
+	if os.Getenv("ENABLE_PPROF") == "true" {
+		debug := router.Group("/debug/pprof")
+		{
+			debug.GET("/", gin.WrapF(pprof.Index))
+			debug.GET("/cmdline", gin.WrapF(pprof.Cmdline))
+			debug.GET("/profile", gin.WrapF(pprof.Profile))
+			debug.POST("/symbol", gin.WrapF(pprof.Symbol))
+			debug.GET("/symbol", gin.WrapF(pprof.Symbol))
+			debug.GET("/trace", gin.WrapF(pprof.Trace))
+			debug.GET("/allocs", gin.WrapH(pprof.Handler("allocs")))
+			debug.GET("/block", gin.WrapH(pprof.Handler("block")))
+			debug.GET("/goroutine", gin.WrapH(pprof.Handler("goroutine")))
+			debug.GET("/heap", gin.WrapH(pprof.Handler("heap")))
+			debug.GET("/mutex", gin.WrapH(pprof.Handler("mutex")))
+			debug.GET("/threadcreate", gin.WrapH(pprof.Handler("threadcreate")))
 		}
 	}
 

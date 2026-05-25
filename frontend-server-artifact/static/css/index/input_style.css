@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+
+body {
+    font-family: "outfit";
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+}
+
+#main-parent {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    grid-column-gap: 0px;
+    grid-row-gap: 0px;
+    max-height: 99vh;
+    max-width: 99vw;
+}
+
+.topbar { grid-area: 1 / 1 / 2 / 7; }
+
+/* --- ALL COLUMN START VALUES BELOW SHIFTED FROM 2 TO 1 --- */
+
+/* Metrics bar now spans full width from column 1 all the way to 7 */
+.important_metrics { grid-area: 2 / 1 / 4 / 7; }
+
+/* Timeline now stretches wider across the left/middle layout area */
+.event_timeline { grid-area: 4 / 1 / 6 / 5; }
+
+/* Recent alerts table matches the timeline width directly underneath it */
+.recent_alert { grid-area: 6 / 1 / 9 / 5; }
+
+/* Donut chart keeps its position pinned perfectly to the right side panel */
+.severity_donut { grid-area: 4 / 5 / 9 / 7; }

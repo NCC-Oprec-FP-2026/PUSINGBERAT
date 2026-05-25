@@ -11,7 +11,7 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://backend:8080/api/v1").rstrip("/")
 
-app = Flask(__name__, static_folder=None)
+app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/")
 
 
 @app.get("/health")
@@ -98,16 +98,13 @@ def static_files(path):
     if asset.exists() and asset.is_file():
         return send_from_directory(STATIC_DIR, path)
 
-    return jsonify({"status": "not_found", "path": path}), 404
+    return serve_template("index.html")
 
 
-# ── SPA catch-all ─────────────────────────────────────────────────────────────
-# Any path not matched above returns index.html so the frontend handles routing.
-# This is required for SPA navigation (e.g. refreshing /dashboard doesn't 404).
 @app.route("/<path:path>")
-def spa_fallback(path):  # noqa: ARG001
+def spa_fallback(path):
     return serve_template("index.html")
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)

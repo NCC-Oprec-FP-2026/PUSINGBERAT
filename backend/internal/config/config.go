@@ -32,6 +32,9 @@ type Config struct {
 
 	// Observability
 	LogLevel string
+
+	// Data Management
+	RetentionDays int
 }
 
 // DSN returns a pgx-compatible connection string built from the DB fields.
@@ -67,10 +70,12 @@ func Load() (*Config, error) {
 		DiscordWebhookURL: loader.optional("DISCORD_WEBHOOK_URL", ""),
 		RulesDir:          loader.optional("RULES_DIR", "./rules"),
 		LogLevel:          loader.optional("LOG_LEVEL", "info"),
+		RetentionDays:     loader.requireInt("RETENTION_DAYS"),
 	}
 
 	cfg.DBPort = loader.defaultInt("DB_PORT", cfg.DBPort, 5432)
 	cfg.ServerPort = loader.defaultInt("SERVER_PORT", cfg.ServerPort, 8080)
+	cfg.RetentionDays = loader.defaultInt("RETENTION_DAYS", cfg.RetentionDays, 7)
 
 	if len(loader.missing) > 0 {
 		return nil, fmt.Errorf(

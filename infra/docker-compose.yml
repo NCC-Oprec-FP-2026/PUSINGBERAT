@@ -1,0 +1,131 @@
+# infra/docker-compose.prod.yml
+# ============================================================
+# Production stack for PUSINGBERAT SIEM.
+#
+# Services:
+#   nginx    — reverse proxy, satu-satunya port yang expose ke luar (:80)
+#   flask    — Flask frontend server (serve HTML templates)
+#   backend  — Go API server (internal only, via nginx)
+#   postgres — Database (internal only)
+#
+# Usage:
+#   cd infra/
+#   docker compose -f docker-compose.prod.yml up -d
+# ============================================================
+
+name: pusingberat-prod
+
+networks:
+    siem_net:
+        driver: bridge
+
+services:
+
+    # ── PostgreSQL ────────────────────────────────────────────
+    postgres:
+        image: postgres:16-alpine
+        container_name: pusingberat_postgres
+        restart: always
+        environment:
+            POSTGRES_DB: ${POSTGRES_DB:-pusingberat}
+            POSTGRES_USER: ${POSTGRES_USER:-siem}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+        expose:
+            - "5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+            - ../backend/migrations/001_create_tables.sql:/docker-entrypoint-initdb.d/001_create_tables.sql:ro
+            - ../backend/migrations/002_add_indexes.sql:/docker-entrypoint-initdb.d/002_add_indexes.sql:ro
+            - ../backend/migrations/003_seed_data.sql:/docker-entrypoint-initdb.d/003_seed_data.sql:ro
+        healthcheck:
+            test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-siem} -d ${POSTGRES_DB:-pusingberat}" ]
+            interval: 10s
+            timeout: 5s
+            retries: 10
+            start_period: 15s
+        networks:
+            - siem_net
+
+    # ── Go Backend ────────────────────────────────────────────
+    # Internal only — diakses via Nginx, tidak expose ke host.
+    backend:
+        build:
+            context: ../backend
+            dockerfile: Dockerfile
+        image: pusingberat-backend:latest
+        container_name: pusingberat_backend
+        restart: always
+        environment:
+            DB_HOST: postgres
+            DB_PORT: ${DB_PORT:-5432}
+            DB_NAME: ${DB_NAME:-pusingberat}
+            DB_USER: ${DB_USER:-siem}
+            DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+            SERVER_PORT: 8080
+            DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+            RULES_DIR: /app/rules
+            LOG_LEVEL: ${LOG_LEVEL:-info}
+            GIN_MODE: release
+        expose:
+            - "8080"
+        depends_on:
+            postgres:
+                condition: service_healthy
+        healthcheck:
+            test: [ "CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/health >/dev/null 2>&1" ]
+            interval: 15s
+            timeout: 5s
+            retries: 5
+            start_period: 20s
+        networks:
+            - siem_net
+
+    # ── Flask Frontend Server ─────────────────────────────────
+    # Serve HTML templates untuk semua halaman SPA.
+    flask:
+        build:
+            context: ../frontend-server
+            dockerfile: Dockerfile
+        image: pusingberat-flask:latest
+        container_name: pusingberat_flask
+        restart: always
+        environment:
+            BACKEND_API_URL: http://backend:8080/api/v1
+        expose:
+            - "5000"
+        depends_on:
+            backend:
+                condition: service_healthy
+        healthcheck:
+            test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=2).read()\"" ]
+            interval: 15s
+            timeout: 5s
+            retries: 5
+            start_period: 15s
+        networks:
+            - siem_net
+
+    # ── Nginx Reverse Proxy ───────────────────────────────────
+    # Satu-satunya service yang expose port ke host (port 80).
+    # Routes: /ws → backend, /api/* → backend, /* → flask
+    nginx:
+        image: nginx:1.27-alpine
+        container_name: pusingberat_nginx
+        restart: always
+        ports:
+            - "80:80"
+            - "443:443"
+        volumes:
+            - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+            - /etc/letsencrypt:/etc/letsencrypt:ro
+        depends_on:
+            backend:
+                condition: service_healthy
+            flask:
+                condition: service_healthy
+        networks:
+            - siem_net
+
+volumes:
+    postgres_data:
+
