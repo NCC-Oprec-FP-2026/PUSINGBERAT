@@ -1,11 +1,15 @@
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+import os
 
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://backend:8080/api/v1").rstrip("/")
 
 app = Flask(__name__, static_folder=None)
 
@@ -18,6 +22,42 @@ def health():
             "service": "pusingberat-flask-dev",
         }
     )
+
+
+@app.route("/api/v1/<path:path>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+def proxy_api(path):
+    query = request.query_string.decode("utf-8")
+    target_url = f"{BACKEND_API_URL}/{path}"
+    if query:
+        target_url = f"{target_url}?{query}"
+
+    headers = {"Accept": request.headers.get("Accept", "application/json")}
+    if request.content_type:
+        headers["Content-Type"] = request.content_type
+
+    proxied = Request(
+        target_url,
+        data=request.get_data() or None,
+        headers=headers,
+        method=request.method,
+    )
+
+    try:
+        with urlopen(proxied, timeout=10) as backend_response:
+            body = backend_response.read()
+            content_type = backend_response.headers.get("Content-Type", "application/json")
+            return Response(body, backend_response.status, content_type=content_type)
+    except HTTPError as err:
+        body = err.read()
+        content_type = err.headers.get("Content-Type", "application/json")
+        return Response(body, err.code, content_type=content_type)
+    except URLError as err:
+        return jsonify({"status": "error", "message": f"backend unavailable: {err.reason}"}), 502
+
+
+@app.route("/api/v1", methods=["GET"])
+def proxy_api_root():
+    return proxy_api("")
 
 
 def serve_template(filename):

@@ -104,7 +104,7 @@
 
                 <div id="right" class="w-full md:w-auto flex justify-center md:justify-end">
                     <div class="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-full py-1.5 px-3.5 text-xs text-rose-400 font-semibold shadow-[0_0_15px_rgba(244,63,94,0.05)]">
-                        <p-badge :value="totalRecords" severity="danger" class="animate-pulse shadow-sm"></p-badge> 
+                        <p-badge :value="total_alerts" severity="danger" class="animate-pulse shadow-sm"></p-badge> 
                         <span class="tracking-wide">Alerts today</span>
                     </div>
                 </div>
@@ -185,8 +185,7 @@
     <script>
         // API things
 
-        const API_HOST = window.location.hostname || 'localhost';
-        const BASE_URL = window.API_BASE_URL || `http://${API_HOST}:8080/api/v1`;
+        const BASE_URL = window.API_BASE_URL || '/api/v1';
 
         const api = {
             async get(endpoint) {
@@ -320,9 +319,9 @@
 
         async function openAlert(id) {
             console.log(id)
-            res = await api.get(`/alerts/${id}`);
+            const res = await api.get(`/alerts/${id}`);
             console.log(res)
-            selected_alert.value =res.data ; 
+            selected_alert.value = res.data;
             open_select_alert_overlay.value = true;
         }
 
@@ -349,8 +348,7 @@
         const onPage = async (event) => {
             current_page.value = event.page + 1; // PrimeVue is 0-indexed
             rows_per_page.value = event.rows;
-            a = await fetchAlerts(current_page.value, data_per_page)
-            console.log(a)
+            await fetchAlerts(current_page.value, rows_per_page.value)
         };
 
 
