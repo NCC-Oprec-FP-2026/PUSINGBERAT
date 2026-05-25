@@ -538,7 +538,10 @@
             let wsSocket = null;
 
             function startWS() {
-                const url = window.WS_URL || `ws://${API_HOST}:8080/ws`;
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const url = window.WS_URL || (window.location.port && window.location.port !== '80' && window.location.port !== '443'
+                    ? `${wsProtocol}//${API_HOST}:8080/ws`
+                    : `${wsProtocol}//${window.location.host}/ws`);
                 try {
                     wsSocket = new WebSocket(url);
                 } catch (err) {
