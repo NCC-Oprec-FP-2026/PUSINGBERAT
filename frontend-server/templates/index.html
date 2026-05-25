@@ -195,7 +195,8 @@
     <script>
         // API things
 
-        const BASE_URL = window.API_BASE_URL || 'http://localhost:8080/api/v1';
+        const API_HOST = window.location.hostname || 'localhost';
+        const BASE_URL = window.API_BASE_URL || `http://${API_HOST}:8080/api/v1`;
         
 
         const api = {
@@ -537,7 +538,7 @@
             let wsSocket = null;
 
             function startWS() {
-                const url = window.WS_URL || 'ws://localhost:8080/ws';
+                const url = window.WS_URL || `ws://${API_HOST}:8080/ws`;
                 try {
                     wsSocket = new WebSocket(url);
                 } catch (err) {

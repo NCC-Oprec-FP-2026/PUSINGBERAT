@@ -185,7 +185,8 @@
     <script>
         // API things
 
-        const BASE_URL = window.API_BASE_URL || 'http://localhost:8080/api/v1';
+        const API_HOST = window.location.hostname || 'localhost';
+        const BASE_URL = window.API_BASE_URL || `http://${API_HOST}:8080/api/v1`;
 
         const api = {
             async get(endpoint) {
