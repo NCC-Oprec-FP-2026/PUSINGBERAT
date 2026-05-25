@@ -26,6 +26,10 @@ type EventRepository interface {
 	GetTopSources(ctx context.Context) ([]repository.TopSource, error)
 }
 
+type EventEvaluator interface {
+	Evaluate(ctx context.Context, ev *domain.ParsedEvent) ([]domain.Alert, error)
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -33,12 +37,18 @@ type EventRepository interface {
 // EventService orchestrates ParsedEvent operations and hosts the background
 // persistence goroutine that drains the watcher pipeline's event channel.
 type EventService struct {
-	repo EventRepository
+	repo      EventRepository
+	evaluator EventEvaluator
+	alerts    chan<- domain.Alert
 }
 
 // NewEventService constructs an EventService with the given repository.
-func NewEventService(repo EventRepository) *EventService {
-	return &EventService{repo: repo}
+func NewEventService(repo EventRepository, evaluator EventEvaluator, alerts chan<- domain.Alert) *EventService {
+	return &EventService{
+		repo:      repo,
+		evaluator: evaluator,
+		alerts:    alerts,
+	}
 }
 
 // Create persists a new parsed event. Called internally by the log watcher
@@ -46,6 +56,9 @@ func NewEventService(repo EventRepository) *EventService {
 func (s *EventService) Create(ctx context.Context, ev *domain.ParsedEvent) error {
 	if err := s.repo.Create(ctx, ev); err != nil {
 		return fmt.Errorf("eventService.Create: %w", err)
+	}
+	if err := s.evaluateAndDispatch(ctx, ev); err != nil {
+		return err
 	}
 	return nil
 }
@@ -97,7 +110,7 @@ func (s *EventService) GetTopSources(ctx context.Context) ([]repository.TopSourc
 //
 // This is called once from main.go after DI wiring is complete.
 func (s *EventService) StartPersistenceWorker(
-	ctx context.Context, 
+	ctx context.Context,
 	eventChan <-chan *domain.ParsedEvent,
 	engine *ruleengine.Engine,
 	resolveLogType func(uuid.UUID) string,
@@ -133,6 +146,13 @@ func (s *EventService) StartPersistenceWorker(
 					continue
 				}
 				saved++
+				if err := s.evaluateAndDispatch(ctx, ev); err != nil {
+					slog.Error("event persistence worker: alert evaluation failed",
+						"event_id", ev.ID,
+						"source_id", ev.LogSourceID,
+						"err", err,
+					)
+				}
 
 				// Resolve log_type
 				logType := ""
@@ -154,4 +174,23 @@ func (s *EventService) StartPersistenceWorker(
 			}
 		}
 	}()
+}
+
+func (s *EventService) evaluateAndDispatch(ctx context.Context, ev *domain.ParsedEvent) error {
+	if s.evaluator == nil || s.alerts == nil {
+		return nil
+	}
+
+	alerts, err := s.evaluator.Evaluate(ctx, ev)
+	if err != nil {
+		return fmt.Errorf("eventService.evaluateAndDispatch: %w", err)
+	}
+	for _, alert := range alerts {
+		select {
+		case s.alerts <- alert:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
