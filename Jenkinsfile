@@ -42,13 +42,14 @@ pipeline {
 
     // ── Environment ───────────────────────────────────────────
     environment {
-        IMAGE_NAME    = 'pusingberat-backend'
-        IMAGE_TAG     = "${env.GIT_COMMIT?.take(7) ?: 'latest'}"
-        COVERAGE_FILE = 'backend/coverage.out'
+        IMAGE_NAME         = 'pusingberat-backend'
+        FLASK_IMAGE_NAME   = 'pusingberat-flask'
+        IMAGE_TAG          = "${env.GIT_COMMIT?.take(7) ?: 'latest'}"
+        COVERAGE_FILE      = 'backend/coverage.out'
 
         // GIT_BRANCH diisi Git plugin: "origin/feature/integrate-be-day7-azaregon"
         // Kita normalisasi jadi "feature/integrate-be-day7-azaregon" untuk perbandingan.
-        BRANCH_CLEAN  = "${env.GIT_BRANCH?.replaceFirst('origin/', '') ?: 'unknown'}"
+        BRANCH_CLEAN       = "${env.GIT_BRANCH?.replaceFirst('origin/', '') ?: 'unknown'}"
     }
 
     // ── Options ───────────────────────────────────────────────
@@ -195,14 +196,21 @@ pipeline {
             }
             steps {
                 sh """
-                    echo "→ Building production image: ${IMAGE_NAME}:${IMAGE_TAG}..."
+                    echo "→ Building production Backend image: ${IMAGE_NAME}:${IMAGE_TAG}..."
                     docker build \
                         -t ${IMAGE_NAME}:${IMAGE_TAG} \
                         -t ${IMAGE_NAME}:latest \
                         -f backend/Dockerfile \
                         backend/
 
-                    echo "✅ Docker image built: ${IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "→ Building production Flask Frontend-Server image: ${FLASK_IMAGE_NAME}:${IMAGE_TAG}..."
+                    docker build \
+                        -t ${FLASK_IMAGE_NAME}:${IMAGE_TAG} \
+                        -t ${FLASK_IMAGE_NAME}:latest \
+                        -f frontend-server/Dockerfile \
+                        frontend-server/
+
+                    echo "✅ Both Backend and Frontend-Server Docker images built successfully"
                 """
             }
         }
