@@ -16,7 +16,7 @@ import (
 func getTestDB(t *testing.T) *pgxpool.Pool {
 	dsn := os.Getenv("TEST_DB_URL")
 	if dsn == "" {
-		dsn = "postgres://postgres:postgres@localhost:5432/pusingberat?sslmode=disable"
+		dsn = "postgres://siem:siempass@localhost:5432/pusingberat?sslmode=disable"
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)

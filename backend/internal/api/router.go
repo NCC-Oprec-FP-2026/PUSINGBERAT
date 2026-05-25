@@ -105,7 +105,13 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 	// pprof - Performance profiling endpoints (enabled via env flag)
 	// ---------------------------------------------------------------
 	if os.Getenv("ENABLE_PPROF") == "true" {
-		debug := router.Group("/debug/pprof")
+		pprofPass := os.Getenv("PPROF_PASSWORD")
+		if pprofPass == "" {
+			pprofPass = "pusingberat-debug"
+		}
+		debug := router.Group("/debug/pprof", gin.BasicAuth(gin.Accounts{
+			"admin": pprofPass,
+		}))
 		{
 			debug.GET("/", gin.WrapF(pprof.Index))
 			debug.GET("/cmdline", gin.WrapF(pprof.Cmdline))

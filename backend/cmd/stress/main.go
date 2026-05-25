@@ -17,7 +17,7 @@ import (
 const (
 	logFilePath    = "stress_test.log"
 	apiBaseURL     = "http://localhost:8080/api/v1"
-	dbConnString   = "postgres://postgres:postgres@localhost:5432/pusingberat?sslmode=disable"
+	dbConnString   = "postgres://siem:siempass@localhost:5432/pusingberat?sslmode=disable"
 	linesPerSecond = 1000
 	duration       = 30 * time.Second
 )
